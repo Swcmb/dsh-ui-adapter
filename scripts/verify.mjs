@@ -1,4 +1,4 @@
-// dsh-context-bili-bridge  —  installation verifier
+// dsh-ui-adapter  —  installation verifier
 // Copyright (C) 2026  Swcmb
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
@@ -21,7 +21,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-const PKG = 'dsh-context-bili-bridge';
+const PKG = '@ianwusb/dsh-ui-adapter';
 // Keep the verifier's host-half imports out of the running process's log.
 process.env.DSH_CTX_BILI_BRIDGE_LOG = '0';
 const argv = process.argv.slice(2);

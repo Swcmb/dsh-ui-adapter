@@ -1,9 +1,9 @@
-// dsh-context-bili-bridge  —  profile installer
+// dsh-ui-adapter  —  profile installer
 // Copyright (C) 2026  Swcmb
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Registers this package as a DSH bundle in one profile:
-//   1. creates a directory junction  <profile>/node_modules/dsh-context-bili-bridge
+//   1. creates a directory junction  <profile>/node_modules/@ianwusb/dsh-ui-adapter
 //      pointing at this repository (pnpm's `link:` shape),
 //   2. adds the dependency + the `dsh.profile.bundles` entry.
 //
@@ -19,7 +19,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const PKG = 'dsh-context-bili-bridge';
+const PKG = '@ianwusb/dsh-ui-adapter';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(`--${name}`);
@@ -41,7 +41,7 @@ if (!fs.existsSync(pkgJsonPath)) {
 
 const dryRun = flag('dry-run');
 const undo = flag('undo');
-const backupPath = `${pkgJsonPath}.bak-before-ctx-bridge`;
+const backupPath = `${pkgJsonPath}.bak-before-ui-adapter`;
 const linkPath = path.join(profile, 'node_modules', PKG);
 const spec = `link:${repoRoot.replace(/\\/g, '/')}`;
 

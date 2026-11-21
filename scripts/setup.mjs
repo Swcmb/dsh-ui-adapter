@@ -1,4 +1,4 @@
-// dsh-context-bili-bridge  —  one-shot, explicit config edit
+// dsh-ui-adapter  —  one-shot, explicit config edit
 // Copyright (C) 2026  Swcmb
 // SPDX-License-Identifier: GPL-3.0-or-later
 //

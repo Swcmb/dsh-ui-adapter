@@ -1,6 +1,6 @@
 {
-  "name": "@ianwusb/dsh-context-bili-bridge",
-  "version": "0.3.1",
+  "name": "@ianwusb/dsh-ui-adapter",
+  "version": "0.4.0",
   "description": "Collapse the duplicate DSH \"上下文\" tabs into one, replace dsh-context's sponsor card with a ledger switch, and feed billion-context's authoritative token ledger into dsh-context's tokenUsage projection.",
   "type": "module",
   "main": "lib/index.js",
@@ -8,11 +8,11 @@
   "author": "Swcmb",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Swcmb/dsh-context-bili-bridge.git"
+    "url": "git+https://github.com/Swcmb/dsh-ui-adapter.git"
   },
-  "homepage": "https://github.com/Swcmb/dsh-context-bili-bridge#readme",
+  "homepage": "https://github.com/Swcmb/dsh-ui-adapter#readme",
   "bugs": {
-    "url": "https://github.com/Swcmb/dsh-context-bili-bridge/issues"
+    "url": "https://github.com/Swcmb/dsh-ui-adapter/issues"
   },
   "publishConfig": {
     "access": "public",

@@ -1,5 +1,5 @@
 # Host half + client half. Mirrors the registration shape used by
 # dsh-context/cordis.patch.yml and billion-context/dsh.bundle.patch.yml.
 - insert:
-    - id: dsh-context-bili-bridge
-      name: dsh-context-bili-bridge
+    - id: dsh-ui-adapter
+      name: '@ianwusb/dsh-ui-adapter'

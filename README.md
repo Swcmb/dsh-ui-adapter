@@ -1,6 +1,8 @@
-# dsh-context-bili-bridge
+# dsh-ui-adapter
 
-> 本包为**独立仓库**（`Swcmb/dsh-context-bili-bridge`），独立维护与发布；曾短暂并入 dsh-toolkit monorepo，2026-11-21 起回归独立，monorepo 内的 `packages/bili-bridge` 不再更新。
+> **UI 适配层**：合并 `dsh-context` 与 `billion-context` 的重复「上下文」标签、把赞助广告位改成账本切换卡、把 billion 账本数据接进 `dsh-context` 的统计投影。
+>
+> 本包为**独立仓库**（`Swcmb/dsh-ui-adapter`），独立维护与发布。2026-11-21 起从 dsh-toolkit monorepo 迁出；曾用包名 `@ianwusb/dsh-context-bili-bridge`（npm 上 0.3.x 及更早版本用旧名）。
 
 一个 [DSH (DeepSeek Harness)](https://www.deepseek.com/) 桌面端插件，把 `dsh-context` 与
 `billion-context` 两个上下文插件合并到同一个「上下文」面板里：
@@ -82,11 +84,11 @@ outputTokens        = outputTokens
 
 ```bash
 # 1) 从 npm 安装（官方 CLI 会同步 profile 的 dependencies 与 bundles）
-dsh plugin --profile <profile> add @ianwusb/dsh-context-bili-bridge@latest
+dsh plugin --profile <profile> add @ianwusb/dsh-ui-adapter@latest
 
 # 2) 摘掉 billion-context 的重名标签（路径换成你 profile 下的 node_modules）
-node node_modules/@ianwusb/dsh-context-bili-bridge/scripts/setup.mjs --dry-run
-node node_modules/@ianwusb/dsh-context-bili-bridge/scripts/setup.mjs   # 回滚：--undo
+node node_modules/@ianwusb/dsh-ui-adapter/scripts/setup.mjs --dry-run
+node node_modules/@ianwusb/dsh-ui-adapter/scripts/setup.mjs   # 回滚：--undo
 
 # 3) 重启 DSH（同源路由在进程启动时注册，仅 Ctrl+R 不够）
 ```
