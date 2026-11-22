@@ -110,28 +110,37 @@
 
 ## 4. Bug 修复方案
 
-### BUG-1 opencode "unknown tool read/glob" —— 已定案（2026-11-22 实测）
+### BUG-1 opencode "unknown tool read/glob" —— 已定案（2026-11-22 三轮 dry-run 实测）
 
-**真实根因（与最初假设不同）**：这条错误**不是 billion-context 报的**，是 **DSH 自己的工具流水线**报的（asar 内有同格式示例 `unknown tool "web_search"`）。
+**报错来源**：DSH 自己的工具流水线（asar 内有同格式示例 `unknown tool "web_search"`），不是 billion-context，也不是网络。
 
-- 本机内核的文件工具面是 `dsh-ops@0.5.5` 发布的 `ops_*` 家族（`publicPrefix:"ops_"`）：`ops_inspect_local_file` / `ops_glob` / `ops_grep` / `ops_bash` …，且**注册在 agent 自己的作用域**，不在 profile 全局视图（实测 `tools.get('ops_glob')` → undefined）。
-- 经 opencode2api 接入的模型按 OpenCode 训练记忆发 `read` / `glob` / `grep` / `bash` / `ls`，这些名字**在本内核里不存在**，于是被拒为 `unknown tool`。
-- `dsh-ops` 的 `replaceTools` 默认 `[]`（不隐藏），所以也不存在"被 mask"的情况；就是单纯缺少这几个别名。
-- **与 absorb 无关**：absorb 只压缩历史工具结果（走模型消息面），不参与工具执行。因此 **`compress.absorb` 保持 `enabled: true`**。
+**实测事实（`DSH_UA_ALIAS_DRY=1` 空注册，三次重启一致）**：
 
-**修复（做进插件，不改任何第三方包）**：`lib/tool-aliases.mjs`
-
-| 别名 | 委托目标 | 参数归一化 |
+| 名字 | 主场 agent 作用域内是否存在 | 来源 |
 |---|---|---|
-| `read` | `ops_inspect_local_file` | `filePath/path` → `path`；`offset` 1-based；`limit` 默认 400 |
-| `glob` | `ops_glob` | `pattern` 字符串 → 数组；补 `path`、`kind:"file"` |
-| `grep` | `ops_grep` | `pattern` + 可选 `include` → `glob:[...]`；`outputMode:"content"` |
-| `bash` | `ops_bash` | `command`；`description` 缺失时自动生成；`timeout`→`timeoutMs` |
-| `ls` / `list` | `ops_glob` | `pattern:["*"]`、`kind:"all"` |
+| `read` / `glob` / `grep` | **存在**，agent 创建后约 5–6 秒到位 | 内核官方工具 |
+| `bash` / `ls` | **不存在** | 内核无此名；命令工具是 `ops_bash` / `pwsh` |
+| `ops_inspect_local_file` / `ops_glob` / `ops_grep` / `ops_bash` | 存在（同一作用域，晚于 agent 创建） | `dsh-ops@0.5.5`，注册在 agent 自己的层 |
 
-- **委托不重写**：别名 `execute` 用 `tools.get(target, exec.agent, exec.toolSet)`（再退 `tools.executable`）拿到真实定义，直接调它的 `execute(mappedArgs, exec)`。DSH 的参数校验、沙箱、审批、渲染全部继续生效，插件不自己 spawn、不读文件。
-- **双注册层**：`agent/created` 时通过 `agent.ctx.plugin(child => child.inject(['tools'], …))` 注册到 **agent 自己的层**（与 `ops_*` 同层，且 `restrict` 只能遮蔽继承来的全局名，遮不掉本层）；同时全局注册一层兜底。同层重名（`read`/`glob`/`grep` 在该作用域已原生存在时）会被内核判重拒绝，插件只记日志跳过，不影响原生工具。
-- **实测证据**：host 日志 `alias:agent-registered` 中 `resolved` 五项全为 `true`（`read→ops_inspect_local_file`、`glob→ops_glob`、`grep→ops_grep`、`bash→ops_bash`、`ls/list→ops_glob`），说明运行时可解析、可委托。
+日志证据：`native:{read:true,glob:true,grep:true,bash:false,ls:false}`；`resolved`（委托目标）全 `true`。
+
+**因此报错窗口是**：agent 刚创建、官方工具与 `ops_*` 尚未发布的那几秒，或落在没有官方工具的子作用域。模型在这个窗口发出 `read`，DSH 就判 `unknown tool`。
+
+**`replaceTools` 不是解法（重要）**：`dsh-ops` 的“替换”是 `tools.restrict({ deny: [...] })` —— **只把官方名字藏起来，不会让 `ops_*` 接管这些名字**。配了它，`read` 会从工具表消失，模型再发 `read` 必然 `unknown tool`，比现状更差。当前 profile 也没有 `dsh-ops-hide-official` 行（`cordis.yml` 为空 entry 列表），即隐藏未启用，保持原状。
+
+**修复（做进插件，不改第三方包）**：`lib/tool-aliases.mjs`
+
+| 别名 | 委托目标 | 实际作用 |
+|---|---|---|
+| `read` | `ops_inspect_local_file` | 兜底（官方名到位后内核判重，别名自动让位） |
+| `glob` | `ops_glob` | 同上 |
+| `grep` | `ops_grep` | 同上 |
+| `bash` | `ops_bash` | **真实补充**（内核无 `bash`） |
+| `ls` / `list` | `ops_glob` | **真实补充**（内核无 `ls`） |
+
+- **委托不重写**：别名 `execute` 用 `tools.get(target, exec.agent, exec.toolSet)`（再退 `tools.executable`）拿真实定义，调它的 `execute(mappedArgs, exec)`。校验、沙箱、审批、渲染仍归 DSH。
+- **双注册层**：`agent/created` 时经 `agent.ctx.plugin(child => child.inject(['tools'], …))` 进 agent 本层（`restrict` 只遮继承的全局名），并全局注册一层兜底；同层重名由内核判重，插件只记日志跳过。
+
 
 **保留 `absorb`**：`C:\Users\Swcmb\.config\billion-context\billion-context.json` 的 `compress.absorb.enabled` 已恢复为 `true`；备份 `billion-context.json.bak-before-absorb` 仅作历史。
 
