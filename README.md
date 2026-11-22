@@ -29,33 +29,13 @@
 
 ## 功能
 
-### 0. OpenCode 风格工具别名（host 半）
+### 0. OpenCode 风格工具别名 —— 已迁出
 
-经 opencode2api 接入的模型会按 OpenCode 的训练记忆发 `read` / `glob` / `grep` /
-`bash` / `ls`。实测本机内核在 agent 作用域里**自带 `read` / `glob` / `grep`**
-（agent 创建后约 5–6 秒到位），但**没有 `bash` 和 `ls`**——命令工具只有 `ops_bash`
-和 `pwsh`。模型在工具尚未发布的那几秒里发 `read`，或发 `bash`，都会被 DSH 判成
-`unknown tool`（这是 DSH 自己的工具流水线在拒绝，与 billion-context 无关，所以
-`compress.absorb` 可以继续开着）。
+`read` / `glob` / `grep` / `bash` / `ls` / `list` 的别名层属于**工具层**，已迁移到
+[`@ianwusb/dsh-opencode-compat`](https://github.com/Swcmb/dsh-opencode-compat) 的
+`lib/ops-aliases.js`（`agent.ctx` 内注册 + global 兜底，委托到 `ops_*`）。
 
-`lib/tool-aliases.mjs` 注册这几个名字并**委托**给真实工具：
-
-| 别名 | 委托目标 | 作用 |
-|---|---|---|
-| `read` | `ops_inspect_local_file` | 兜底（官方名到位后内核判重，别名自动让位） |
-| `glob` | `ops_glob` | 同上 |
-| `grep` | `ops_grep` | 同上 |
-| `bash` | `ops_bash` | 真实补充（内核无 `bash`） |
-| `ls` / `list` | `ops_glob` | 真实补充（内核无 `ls`） |
-
-委托走 `tools.get(target, agent, toolSet)` 拿到真实定义后调它的 `execute`，参数按目标
-schema 归一化。DSH 的参数校验、沙箱、审批与渲染全部继续生效；插件不自己读文件、不自己
-spawn 进程。注册分两层：`agent/created` 时进 agent 自己的作用域（与 `ops_*` 同层，
-`restrict` 遮不掉），同时全局注册一层兜底；同层重名由内核判重，跳过即止。
-
-> 不要用 `dsh-ops` 的 `replaceTools` 来解决这个报错：那是
-> `tools.restrict({ deny })`，只把官方名字藏起来，不会让 `ops_*` 接管这些名字，
-> 配了只会让 `read` 更不可用。
+本插件不再注册任何工具，也不再需要 `tools` 服务。
 
 ### 1. 单标签
 
