@@ -110,38 +110,53 @@
 
 ## 4. Bug 修复方案
 
-### BUG-1 opencode "unknown tool read/glob"
-- **根因**：`billion-context` 的 opencode 端点（`dist/agent/opencode-native.js`）只放行 `ACP_TOOL_NAMES` 白名单（compress / decompress / search_context / status / cache 五个工具），收到 `read` / `glob` 一律 `400 unknown tool`。这些请求来自某个把它当通用工具端点的客户端。
-- **诊断步骤**：
-  1. 在 host 日志中定位发 `read`/`glob` 的调用方（哪个 session / 客户端 / 适配器）。
-  2. 确认 `billion-context` 的 opencode 端点是否被启用（profile 配置 / 环境变量）。
-  3. 确认是否由 C 盘残留 `dsh-opencode-compat` 或其他 opencode 适配器发起。
-- **修复分支**：
-  - 若来自不该启用的客户端 → 定位并停用（清理 C 盘残留 `C:\Users\Swcmb\.dsh\profiles\desktop\node_modules\@ianwusb\dsh-opencode-compat`；该副本不被 D 盘加载，清理用于消除混淆；**删除前需你确认该路径**）。
-  - 若确需 read/glob 走该端点 → 在 `billion-context` 端点增加 read/glob → DSH 工具的透传映射（改第三方包，需评估）。
-  - 若该端点本不该对外 → 在 profile 配置中关闭 `billion-context` 的 opencode 端点。
-- **风险**：中（需运行时定位调用方）。
+### BUG-1 opencode "unknown tool read/glob" —— 已定案（2026-11-22 实测）
 
-### BUG-2 模型 `hy4-flash-free` 返回空内容
-- **根因**：`@deepseek-ai/dsh-llm` 报 `model "hy4-flash-free" returned a completed response with no content`，即 provider `opencode2api`（`http://127.0.0.1:8080/v1`）返回了 completed 但 content 为空。
-- **诊断步骤**：
-  1. 复现并抓取该请求的原始响应（是否 finish_reason 正常但 content 为空）。
-  2. 对比同 provider 下 `big-pickle` / `beam-free` 是否正常，判断是模型问题还是 provider 问题。
-  3. 检查 `reasoningEffort: apex` 是否导致模型只返回 reasoning 而没有 content。
-- **修复分支**：
-  - 若是模型/provider 缺陷 → 调整 `agent-default-model`（`cordis.patch.yml`）到可用模型，或在 `llm-pi-ai` 的 `opencode2api` 模型列表里移除/降级该模型。
-  - 若是 `reasoningEffort` 导致 → 调低（apex → high/medium）。
-  - 增加空响应兜底：DSH 侧已有重试（1836ms），可评估是否需要在 provider 配置层加处理。
-- **风险**：中（需运行时抓包/日志）。
+**真实根因（与最初假设不同）**：这条错误**不是 billion-context 报的**，是 **DSH 自己的工具流水线**报的（asar 内有同格式示例 `unknown tool "web_search"`）。
+
+- 本机内核的文件工具面是 `dsh-ops@0.5.5` 发布的 `ops_*` 家族（`publicPrefix:"ops_"`）：`ops_inspect_local_file` / `ops_glob` / `ops_grep` / `ops_bash` …，且**注册在 agent 自己的作用域**，不在 profile 全局视图（实测 `tools.get('ops_glob')` → undefined）。
+- 经 opencode2api 接入的模型按 OpenCode 训练记忆发 `read` / `glob` / `grep` / `bash` / `ls`，这些名字**在本内核里不存在**，于是被拒为 `unknown tool`。
+- `dsh-ops` 的 `replaceTools` 默认 `[]`（不隐藏），所以也不存在"被 mask"的情况；就是单纯缺少这几个别名。
+- **与 absorb 无关**：absorb 只压缩历史工具结果（走模型消息面），不参与工具执行。因此 **`compress.absorb` 保持 `enabled: true`**。
+
+**修复（做进插件，不改任何第三方包）**：`lib/tool-aliases.mjs`
+
+| 别名 | 委托目标 | 参数归一化 |
+|---|---|---|
+| `read` | `ops_inspect_local_file` | `filePath/path` → `path`；`offset` 1-based；`limit` 默认 400 |
+| `glob` | `ops_glob` | `pattern` 字符串 → 数组；补 `path`、`kind:"file"` |
+| `grep` | `ops_grep` | `pattern` + 可选 `include` → `glob:[...]`；`outputMode:"content"` |
+| `bash` | `ops_bash` | `command`；`description` 缺失时自动生成；`timeout`→`timeoutMs` |
+| `ls` / `list` | `ops_glob` | `pattern:["*"]`、`kind:"all"` |
+
+- **委托不重写**：别名 `execute` 用 `tools.get(target, exec.agent, exec.toolSet)`（再退 `tools.executable`）拿到真实定义，直接调它的 `execute(mappedArgs, exec)`。DSH 的参数校验、沙箱、审批、渲染全部继续生效，插件不自己 spawn、不读文件。
+- **双注册层**：`agent/created` 时通过 `agent.ctx.plugin(child => child.inject(['tools'], …))` 注册到 **agent 自己的层**（与 `ops_*` 同层，且 `restrict` 只能遮蔽继承来的全局名，遮不掉本层）；同时全局注册一层兜底。同层重名（`read`/`glob`/`grep` 在该作用域已原生存在时）会被内核判重拒绝，插件只记日志跳过，不影响原生工具。
+- **实测证据**：host 日志 `alias:agent-registered` 中 `resolved` 五项全为 `true`（`read→ops_inspect_local_file`、`glob→ops_glob`、`grep→ops_grep`、`bash→ops_bash`、`ls/list→ops_glob`），说明运行时可解析、可委托。
+
+**保留 `absorb`**：`C:\Users\Swcmb\.config\billion-context\billion-context.json` 的 `compress.absorb.enabled` 已恢复为 `true`；备份 `billion-context.json.bak-before-absorb` 仅作历史。
+
+> 说明：早前"关掉 absorb 消除报错"只是**相关而非因果**——那一次页面里 `unknown tool` 归零，是因为其间会话被重载，而不是 absorb 修好了它。
+
+
+### BUG-2 模型 `hy4-flash-free` 返回空内容 —— 已定案（2026-11-22 实测）
+
+- **根因**：`agent-default-model.reasoningEffort: apex` 不是 provider 接受的值。`opencode2api`（`http://127.0.0.1:8080/v1`）支持的取值是 `minimal/low/medium/high/xhigh/max`。
+- **实测对比**（同一 prompt 直打 provider）：
+  - `reasoning_effort: "apex"` → `400001 request invalid`（被上游拒绝，DSH 侧表现为 completed 无 content）
+  - `reasoning_effort: "max"` → 正常返回文本
+- **修复**：`cordis.patch.yml` 的 `agent-default-model.reasoningEffort` 由 `apex` 改为 `max`。
+- **证据**：修复后页面内仅剩历史消息里的 `no content`（时间戳 `00:32`/`00:41`、"已重试 5/5"），无新增。
+- **附带发现**：`billion-context` 的 bundle patch 已把 `EMPTY_RESPONSE` 加进 `llm-deepseek` 的重试码，所以空响应会重试 5 次再失败——这也是日志里"已重试 5/5"的来源。
 
 ## 5. 架构与文件改动
 
 | 文件 | 改动 |
 |---|---|
 | `D:\dsh-ui-adapter\lib\client.js` | 新增 `UI_PATCH_CSS`（UI-4/6/7 + UI-1 兜底）注入；修复 `createSlot`（UI-1）；UI-3 宽度 CSS |
-| （不新增文件） | 补丁 CSS 集中在 `lib/client.js` 的 `UI_PATCH_CSS` 常量，遵循最简实现 |
-| `D:\ai-configs\runtime\dsh\profiles\desktop\cordis.patch.yml` | `better-sidebar.config.guideTakeover=false`；BUG-2 视诊断调整 `agent-default-model` |
-| `C:\Users\Swcmb\.dsh\profiles\desktop\...`（清理） | 删除装错的 `@ianwusb/dsh-opencode-compat` 残留（BUG-1） |
+| `D:\dsh-ui-adapter\lib\tool-aliases.mjs`（新增） | BUG-1：opencode 风格工具别名 `read/glob/grep/bash/ls/list`，委托到 `ops_*`，双注册层 |
+| `D:\dsh-ui-adapter\lib\index.js` | `apply` 里调用 `registerToolAliases(ctx)` |
+| `D:\ai-configs\runtime\dsh\profiles\desktop\cordis.patch.yml` | `better-sidebar.config.guideTakeover=false`；`agent-default-model.reasoningEffort: apex → max`（BUG-2） |
+| `C:\Users\Swcmb\.config\billion-context\billion-context.json` | `compress.absorb.enabled` 保持 `true`（不关） |
 
 > 设计原则：补丁 CSS 集中在 `lib/client.js`（或独立 `css-patches.js`），以 `data-*` 选择器为主、class 为辅；所有规则加 `!important` 以避免被主题覆盖；不修改任何第三方插件源码。
 

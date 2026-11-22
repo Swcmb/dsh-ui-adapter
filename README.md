@@ -29,6 +29,28 @@
 
 ## 功能
 
+### 0. OpenCode 风格工具别名（host 半）
+
+经 opencode2api 接入的模型会按 OpenCode 的训练记忆发 `read` / `glob` / `grep` /
+`bash` / `ls`。本内核的文件工具面是 `dsh-ops` 的 `ops_*` 家族，这些名字不存在，调用
+会被 DSH 自己的工具流水线拒为 `unknown tool "read"`（与 billion-context 无关，所以
+`compress.absorb` 可以继续开着）。
+
+`lib/tool-aliases.mjs` 把这些名字注册成别名并**委托**给真实工具：
+
+| 别名 | 委托目标 |
+|---|---|
+| `read` | `ops_inspect_local_file` |
+| `glob` | `ops_glob` |
+| `grep` | `ops_grep` |
+| `bash` | `ops_bash` |
+| `ls` / `list` | `ops_glob` |
+
+委托走 `tools.get(target, agent, toolSet)` 拿到真实定义后调它的 `execute`，参数按目标
+schema 归一化。DSH 的参数校验、沙箱、审批与渲染全部继续生效；插件不自己读文件、不自己
+spawn 进程。注册分两层：`agent/created` 时进 agent 自己的作用域（与 `ops_*` 同层，
+`restrict` 遮不掉），同时全局注册一层兜底；同层重名由内核判重，跳过即止。
+
 ### 1. 单标签
 
 写 `billion-context` 自己的配置键 `dsh.contextTab: false`（由 `scripts/setup.mjs`
