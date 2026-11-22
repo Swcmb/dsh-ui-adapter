@@ -53,13 +53,18 @@
 - **改动**：`lib/client.js` 的 `SLOT_CSS` 与 `createSlot`。
 - **风险**：低。
 
-### UI-3 会话详情默认显示 + 窄宽度
-- **现状**：DSH 原生右侧栏即"会话详情"，被 `better-sidebar` 的 `guideTakeover=true` 用开始页覆盖。
-- **方案**：
-  1. profile `cordis.patch.yml` 的 `better-sidebar` 行 config 增加 `guideTakeover: false`（现有行在 915-918 行，已有 `agentOpenTools: true`）。
-  2. 侧边栏宽度：用 CSS 约束右侧栏容器到截图 4 的宽度（目标 280–300px，以截图 4 实测为准）。
-- **改动**：`D:\ai-configs\runtime\dsh\profiles\desktop\cordis.patch.yml` + `lib/client.js` CSS。
-- **风险**：低。若 `guideTakeover: false` 后原生页不是会话详情，则回退为 CSS 隐藏开始页 + 显示原生详情。
+### UI-3 "会话详情"下放（默认收起，不占主区）—— 已实现
+- **需求变更（2026-11-22 10:34）**：不是"默认打开"，而是**默认收起**，让它回到侧边栏按需打开（对应截图 37 → ef）。
+- **实现**：
+  1. client 半一次性写入 `localStorage['dsh-claude-style.sessionPanelClosed']='1'`（下次加载即关闭）；
+  2. 若当次已展开（`body[data-dsh-claude-session-panel]`），点 `.dsh-claude-session-panel-button` 收起。
+  一次性动作，用户之后手动打开不会被抢。
+- **保留**：CSS 里的 `aside.dsh-claude-details` 宽度约束（290px），只在用户主动打开时生效。
+- **验证**：CDP 只读检查 `panelOpen:false`、`storedFlag:"1"`、`aside` 未渲染。
+- **风险**：低。
+
+### UI-3b 会话详情进侧边栏（待做，属第二批）
+- 目标：侧边栏默认页 = 会话详情，宽度按截图；这需要把 claude-style 的 `aside` 搬进 better-sidebar 容器或注册 tab，见 §3.5 的"100% 还原"约束。
 
 ### UI-4 隐藏三个图标
 - **现状**：顶部 `btw`、顶部方框图标（`dsh-btw` / claude-style 注入）、底部输入区 `btw`。

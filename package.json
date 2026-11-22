@@ -1,6 +1,6 @@
 {
   "name": "@ianwusb/dsh-ui-adapter",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Collapse the duplicate DSH \"上下文\" tabs into one, replace dsh-context's sponsor card with a ledger switch, and feed billion-context's authoritative token ledger into dsh-context's tokenUsage projection.",
   "type": "module",
   "main": "lib/index.js",
