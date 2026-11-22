@@ -1,6 +1,3 @@
-[submodule "session-panel"]
-	path = session-panel
-	url = git@github.com:Swcmb/dsh-session-panel.git
-[submodule "cs-panel-hider"]
-	path = cs-panel-hider
-	url = git@github.com:Swcmb/dsh-cs-panel-hider.git
+[submodule "dsh-session-panel-kit"]
+	path = dsh-session-panel-kit
+	url = git@github.com:Swcmb/dsh-session-panel-kit.git
