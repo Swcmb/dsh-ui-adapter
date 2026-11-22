@@ -1,6 +1,3 @@
 [submodule "dsh-session-panel-kit"]
 	path = dsh-session-panel-kit
 	url = git@github.com:Swcmb/dsh-session-panel-kit.git
-[submodule "default-sidebar-tab"]
-	path = default-sidebar-tab
-	url = ../default-sidebar-tab.git
