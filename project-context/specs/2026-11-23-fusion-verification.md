@@ -515,14 +515,24 @@ const guide = guides[0];                       // ← 却在这里才声明
 
 `const` 在声明前处于暂时性死区，读它是 `ReferenceError`，不是 `undefined`。
 
-**实机佐证**（累积 `.diag.log`，1700 行）：
+**证据的边界（重要更正）**
 
-| stage | 命中 | 说明 |
-|---|---|---|
-| `skip-collapsed` | **0** | 而 `runtime-probe.apiIsExpanded` 在 1396 次采样中**全程为 `false`**；按代码该分支应命中数百次 |
-| `skip-hidden-renderer` | **0** | 同理 |
-| `replaced` | 0 | 见 §6.5-R：观察窗内无「已挂载会话自带 guide」 |
-| `openTab-error` | 0 | 说明异常并非从 `openTab` 抛出，而是更早的 `ReferenceError` |
+初版本节曾用「`skip-collapsed` 命中 0 次，而 `runtime-probe.apiIsExpanded` 全程为
+`false`，所以该分支应命中数百次却没命中」来佐证 TDZ。**这个推理是错的，已撤回**：
+跨全部 1795 行 diag（含归档日志）的 17 条 `probe` 事件里，`mineGuides` **全部为空数组**，
+说明 `runReplace` 在 `guides.length === 0` 处就已返回，根本走不到 skip 分支。
+「skip 为 0」与「`isExpanded` 为 false」两者并不构成矛盾，因为条件从未同时成立。
+
+**该缺陷成立的依据只有两条，不含实机日志**：
+
+1. 按代码语句顺序直接可判定：`const` 声明在读取之后 → 暂时性死区。
+2. 最小复现抛出 `ReferenceError: Cannot access 'guide' before initialization`。
+3. 三条新回归测试中，两条在修复前源码上失败、修复后通过（见 §7.2）。
+
+**同时说明：该缺陷在实机上从未被触发**——因为整个观察期内没有任何「已挂载会话自带
+guide tab」的时刻，两个 skip 分支的入口条件一次都没同时满足。所以这是一处**潜伏缺陷**
+（latent bug），修它是因为它在条件具备时必然抛错，而不是因为它已造成可见故障。
+把它说成「实机上静默失效数百次」是**过度断言**，已在此纠正。
 
 **最小复现**（6 行，与真实语句顺序一致）：
 
