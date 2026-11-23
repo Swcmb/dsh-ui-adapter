@@ -216,3 +216,134 @@ node scripts/verify.mjs --profile "D:/ai-configs/runtime/dsh/profiles/desktop"
 - adapter client：PASS；session-panel client：PASS；风险 A：**已解除**。
 - renderer DOM/console 仍无法直连（CDP 只能到 host realm）；`sidebarRightTabs` 由上述 session-panel 专属 stage 与 `state-probe` 快照证明，不再依赖错误归因。
 - `--compose` 因 `dsh` CLI 缺失未执行。
+
+---
+
+## 5. Task 2：融合 cs-panel-hider（第二个插件）
+
+分支：`agent/fuse-kit-into-root`；BASE `7e06bd7`。
+融合 commit：`ef1b722d8bdf2069d6dcab8f1c479da923410567`（`refactor: fuse cs-panel-hider into root`）。
+结论：**DONE** —— 本地测试全绿、verify 7/7、重启后 cs-panel-hider 与 adapter / session-panel 均取得直接证据。
+
+### 5.1 实现要点
+
+- `lib/client-cs-panel-hider.js`、`lib/host-cs-panel-hider.mjs`、`LICENSE-cs-panel-hider`、
+  `tests/cs-panel-hider-mock-client.mjs` 从 `dsh-session-panel-kit/cs-panel-hider/` 平铺到根；
+  该子目录已删除。
+- `lib/client.js` 仍只有一个顶层 `window.__ModuleLoader__.load({ id: '@ianwusb/dsh-ui-adapter', factory })`；
+  cs-panel-hider IIFE 原样内联在 session-panel IIFE 之后、footer 之前。factory 内只临时替换
+  `window.__ModuleLoader__` 并在 `finally` 恢复，真实 `window` 未被遮蔽；footer 自动组合三个
+  descriptor 的 `apply` / `inject` 并写入 `__DSH_UI_ADAPTER_CLIENT_MODULES__`。
+- `lib/index.js` 增加 `applyCsPanelHider(ctx)`，host 导出名由 `apply` 改为
+  `applyCsPanelHider`；`inject` 仍为 `['webServer']`，`cordis.patch.yml` 未新增行。
+- `package.json` 增加 `./client-cs-panel-hider` export 与 `LICENSE-cs-panel-hider`；
+  `dsh.client.inject` 未变（cs-panel-hider 的 client inject 为 `[]`）。
+- 本地测试相应更新：`tests/client.test.mjs` 的自证数组断言增加第三个 id，并新增
+  cs-panel-hider CSS 注入断言；独立 mock 改读平铺后的 `lib/client-cs-panel-hider.js`
+  并补 `setInterval` stub。
+
+### 5.2 本地验证（实跑输出）
+
+```
+node --test tests/*.test.mjs
+  -> # tests 34 / # pass 34 / # fail 0
+node tests/cs-panel-hider-mock-client.mjs
+  -> exit 0; {"moduleId":"@local/dsh-cs-panel-hider","inject":[],
+              "cssBytes":438,"flagCleaned":true,"ok":true}
+node scripts/install.mjs --profile "D:/ai-configs/runtime/dsh/profiles/desktop" --dry-run
+  -> "[install] already registered, nothing to do"
+node scripts/verify.mjs --profile "D:/ai-configs/runtime/dsh/profiles/desktop"
+  -> 7/7 checks passed
+     host routes: /__ctx-bili/sessions · /__ctx-bili/status · /__ctx-bili/diag ·
+                  /__dsh-session-panel/diag · /__dsh-session-panel ·
+                  /__dsh-cs-panel-hider/diag
+```
+
+`--compose` 本次未执行（沿用 Task 1 记录：本机 `dsh` CLI 不在 PATH）。
+
+### 5.3 profile 清理
+
+- 备份：`D:/ai-configs/runtime/dsh/profiles/desktop/package.json.bak-before-cs-fusion`（4248 bytes）。
+- 从 `dependencies` 删除 `@local/dsh-cs-panel-hider`（原指向已删除的 kit 子目录）与失效的
+  `@local/dsh-session-panel`。
+- `dsh.profile.bundles` 中这两项在清理时**已经不存在**（Task 1 已移除），脚本仍按幂等方式过滤；
+  最终 `@local` 仅剩 `@local/dsh-default-sidebar-tab`（依赖与 bundle 均在），留给 Task 3。
+- 删除 junction：`node_modules/@local/dsh-cs-panel-hider` 与
+  `node_modules/@local/dsh-session-panel`（`lstat().isSymbolicLink() === true`，用 `unlinkSync`
+  移除，未触及目标目录内容）。未执行 `install.mjs --undo`。
+
+### 5.4 DSH 重启
+
+PowerShell，先清空 `ELECTRON_RUN_AS_NODE`（原 `1`）与 `NODE_OPTIONS`（原 WorkBuddy 的
+`--require=...node-language-shim.cjs`），清空后两者均为空。
+
+- 旧 PID：`39080, 43876, 54704, 54780, 55828`；CloseMainWindow 目标是 43876
+  （`跟大肥鱼说话 — DeepSeek Harness`）。
+- 等待 15s 后五个进程仍残留，逐个 `Stop-Process -Force`；确认无残留后 `Start-Process`，
+  再等待 28s。
+- 新 PID：`2632, 16012, 49456, 56796, 57196`；监听端口 `127.0.0.1:59806`（Web，owner 16012）、
+  `172.27.16.1:50930`、`127.0.0.1:9230`（inspector CDP）。启动输出无 error 级行。
+
+### 5.5 HTTP 端点（端口 59806）
+
+```
+GET /__ctx-bili/status            -> 200
+{"origin":"http://127.0.0.1:18787","pid":19864,"live":true,"source":"instance-file",
+ "hits":{"/__ctx-bili/sessions":4,"/__ctx-bili/status":2,"/__ctx-bili/diag":1}}
+GET /__dsh-cs-panel-hider/diag    -> 200 {"ok":true,"accepted":0}
+GET /__ctx-bili/sessions          -> 200
+GET /__ctx-bili/diag              -> 204（该路由仅接受 POST）
+```
+
+### 5.6 cs-panel-hider 实机证据（`__dsh-cs-panel-hider/diag` → 仓库根 `.diag.log`）
+
+日志基线 1270 行，重启后新增行中统计：
+
+| stage | 次数 | 证据 |
+|---|---|---|
+| `style-installed` | 1 | `2026-11-23T03:53:53.768Z {"styleId":"dsh-cs-panel-hider-style"}` |
+| `hide-probe` | 2 | 见下方 computed style 断言 |
+| `hide-probe-failed` | 0 | 无异常 |
+
+两次 `hide-probe` 原文：
+
+```
+2026-11-23T03:53:53.788Z {"styleInstalled":true,"styleHasRule":true,
+  "panel":{"label":"panel","present":true,"display":"none","visibility":"hidden","hidden":true},
+  "toggle":{"label":"toggle","present":false,"display":null,"visibility":null,"hidden":null},
+  "bodyPanelFlag":false}
+2026-11-23T03:53:57.811Z {"styleInstalled":true,"styleHasRule":true,
+  "panel":{"label":"panel","present":true,"display":"none","visibility":"hidden","hidden":true},
+  "toggle":{"label":"toggle","present":true,"display":"none","visibility":"hidden","hidden":true},
+  "bodyPanelFlag":false}
+```
+
+这是 client 直接读取 computed style 的断言：`.dsh-claude-details-root` 与
+`.dsh-claude-session-panel-button` 在目标节点存在时均为 `display:none` / `visibility:hidden`，
+`body[data-dsh-claude-session-panel]` 已清除。说明 dsh-claude-style 确实安装且节点被 CSS 隐藏，
+且 `POST /__dsh-cs-panel-hider/diag` 落盘通道真实可用。
+
+### 5.7 回归证据
+
+- `.host.log` 新 PID 16012：`apply:enter` → `bind:index-inject` → `bind:routes-ok` →
+  `bind:effect-owned` → `apply:exit`（03:53:35Z），证明统一 host 聚合三个模块后正常进入/退出。
+- adapter 路由命中（PID 16012）：`/__ctx-bili/status` `hits:1`→`3`、`/__ctx-bili/sessions`
+  `hits:1`→`9`、`/__ctx-bili/diag` `hits:1`→`3`，全部 > 0。
+- adapter `client:diag`（PID 16012）：首个上报为会话尚未就绪时的
+  `match:"fallback", shim:"none"`；03:54:28.779Z 转为
+  `{"via":"runtime-inject","sessions":"ok","id":"session-723f62c7-e057-42fe-97c7-f0f0c71808e3",
+   "shim":"active","match":"exact","sessionCount":154,"usage":true}`，垫片正常接管。
+- session-panel 专属 stage（按内容区分于 default-sidebar-tab 的 `loaded`/`attached`/`probe`/
+  `runtime-probe`）：`registered`×1（`kind:"dsh-session-details"`, `tabId:"@local/dsh-session-panel"`）、
+  `header-toggle-registered`×1、`sidebar-right-injected`×1（`hasToggle:true`）、
+  `guide-entries`×1（`mineCount:1`, `kindResolvable:true`）、`state-probe`×11
+  （`withDetails:3`, `detailsActiveCount:3`, `guideReplacedCount:3`）。
+  证明第三个 IIFE 内联后 session-panel 仍真实执行。
+
+### 5.8 限制与关注
+
+- `--compose` 未执行：本机 `dsh` CLI 缺失，属环境限制。
+- renderer console / 直接 DOM 检查仍不可用（CDP 只暴露 host realm，沿用 Task 1 记录）；
+  本次 CSS 隐藏结论来自 client 自身在真实页面读取 computed style 的 diag 断言，不依赖截图。
+- 顶部开关 `.dsh-claude-session-panel-button` 在首次 probe 时不存在、第二次出现且已被隐藏，
+  属 dsh-claude-style 自身渲染时序，不影响结论。
