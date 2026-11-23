@@ -169,7 +169,7 @@ DSH 宿主进程
 ## 开发
 
 ```bash
-node --test tests/*.test.mjs                                # 27 项
+node --test tests/*.test.mjs                                # 72 项
 node scripts/verify.mjs --profile <profile-dir>             # 7 项只读校验
 node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --dump-config
 ```
@@ -238,9 +238,48 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 
 ### 历史
 
-- `session-panel` 源自 `dsh-session-panel-kit` 子模块，于 2026-11-23 以 subtree merge
-  方式并入本仓库（`agent/fuse-kit-into-root` 分支），随后平铺到根目录；原始提交历史保留。
-- 该插件本身从 `dsh-claude-style` 的 `sessionPanel` 功能剥离并裁剪，仅依赖原生 DSH。
+三个套件插件原先合装在 `dsh-session-panel-kit`（一个 git submodule，内含三个独立包：
+`session-panel/` → `@local/dsh-session-panel`、`cs-panel-hider/` → `@local/dsh-cs-panel-hider`、
+`default-sidebar-tab/` → `@local/dsh-default-sidebar-tab`）。2026-11-23 先以 subtree merge
+并入本仓库（`agent/fuse-kit-into-root` 分支），再逐个平铺到根目录并删除子目录，**原始提交
+历史全部保留**（以 `--no-ff` 合并回 `main`，非 squash / rebase）。
+
+来源：
+
+- `session-panel` ← `Swcmb/dsh-session-panel`；该插件本身从 `dsh-claude-style` 的
+  `sessionPanel` 功能剥离并裁剪，仅依赖原生 DSH。
+- `cs-panel-hider` ← `Swcmb/dsh-cs-panel-hider`。
+- `default-sidebar-tab` ← 本地仓库（原本就没有远程）。
+
+融合后三者不再是可分别安装的独立包，而是同一 Cordis 插件 `dsh-ui-adapter` 内的三个模块。
+
+## session-panel（右侧会话详情栏）
+
+`session-panel` 已平铺进本仓库，作为融合套件第二个模块。它从 `dsh-claude-style` 的
+`sessionPanel` 功能剥离并逐行裁剪而来，**只依赖原生 DSH**。
+
+- **注册的 tab kind**：`dsh-session-details`（标题「会话详情」），经
+  `ctx.sidebarRightTabs.register` 注册，是 `default-sidebar-tab` 的默认目标。
+- **client 半**：`lib/client-session-panel.js`。
+- **host 半**：`lib/host-session-panel.mjs`，把会话数据折成一个面板值，经同源只读路由
+  `GET /__dsh-session-panel?id=<sessionId>` 提供；client 半**每 2.5 秒**轮询一次，
+  按会话隔离读数。
+- **五个区块与数据来源**（全部原生 DSH）：
+
+| 区块 | 来源 |
+|---|---|
+| 环境 | 会话 header 的 `cwd` + `node:child_process` 读 git |
+| 上下文 | `sessionQuery.observeSession` 事件流（按块形态 + 来源归属计价）+ `contextPressure` 投影 |
+| 会话统计 | `sessionStats` / `tokenUsage` 投影 |
+| Token 用量 | 同上 token 桶 |
+| 子智能体 | `subagentCatalog` 投影 + `agents` 服务的运行状态 |
+
+- **入口**：会话头部的「会话详情」按钮（`conversation.session.header.utilities` slot）
+  开关详情栏；该 slot 不可用时降级为右上角悬浮按钮。
+- **与上游的取舍**：只实现实际出现在截图里的五个区块，产出 / 变更 / 后台任务的折叠
+  列表未包含；token 计价保留字符类别算法（CJK / 词 / 数字 / 空白 / 标点），图片按
+  patch 网格估算；去掉原实现的多 feature 调度、settings 页、i18n 框架、骨架屏动画。
+  会话 id 从活跃对话节点的 `data-conversation-session` 属性读取。
 
 ## cs-panel-hider（dsh-claude-style 详情栏隐藏器）
 
@@ -255,6 +294,18 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 - **host 半**：`lib/host-cs-panel-hider.mjs`，只提供诊断落盘路由
   `POST /__dsh-cs-panel-hider/diag` → 仓库根 `.diag.log`；诊断 stage 有
   `style-installed`、`hide-probe`、`hide-probe-failed`。
+- **隐藏的三个目标**：
+
+| 目标 | 选择器 | 说明 |
+|---|---|---|
+| 详情栏（整栏） | `.dsh-claude-details-root` | dsh-claude-style 自挂载到 body 的容器 |
+| 顶部开关图标 | `.dsh-claude-session-panel-button` | 注册在会话头部 utilities 槽，`aria-label="会话详情"` |
+| 布局副作用 | `body[data-dsh-claude-session-panel]` | 原插件用它把头部让位给面板，补丁持续清掉以恢复原布局 |
+
+- **为什么用 CSS 隐藏而不是删节点**：这两个节点属于 dsh-claude-style 自己的 React 树，
+  直接 `remove()` 会在它下次渲染时被重建，还可能让 React 的后续操作报错。CSS
+  `!important` 能覆盖它的 inline style，原插件重渲染 / 重建节点后依然生效，且不动它的
+  状态——这是最稳的做法。面板是 `position:fixed`、不占文档流，隐藏后对话区不会留空白。
 - **与 session-panel 协作**：session-panel 提供本套件自己的右侧会话详情栏，
   cs-panel-hider 只隐藏 `dsh-claude-style` 的旧详情栏，两者操作不同节点，互不冲突。
   统一 Cordis 插件名仍是 `dsh-ui-adapter`，`cordis.patch.yml` 不新增 insert 行。
@@ -263,6 +314,9 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 
 - 融合套件整体：**GPL-3.0-or-later**（见 `COPYING`、`LICENSE-session-panel`、
   `LICENSE-cs-panel-hider`、`LICENSE-default-sidebar-tab`）。
+- 三个迁入模块各自保留原 `LICENSE-*` 全文；`cs-panel-hider` 与 `default-sidebar-tab`
+  均未复制第三方代码，前者只引用 dsh-claude-style 的 DOM class 作为隐藏目标，后者只调用
+  原生 DSH 公开的 `ctx.sidebarRight` 导航 API。
 - `lib/tokens.mjs` 与详情栏中的 token 计价算法、中文文案移植自
   `dsh-claude-style`（MIT, © 2026 Nwflower），声明见 `NOTICES.md`；MIT 与 GPLv3 兼容，
   汇入时保留原始 MIT 授权全文。
@@ -283,8 +337,54 @@ session-panel、cs-panel-hider 一起由统一入口 `lib/client.js` / `lib/inde
   作为全局变量注入每个 index 页面。
 - **配置项**（cordis 配置段）：
   - `defaultTab`：非空字符串，目标 tab 的 kind；默认 `dsh-session-details`。
+    设成 `guide` 等于不启用替换。
   - `enabled`：布尔，默认 `true`；设为 `false` 时完全不替换。
 - **全局注入**：`__DSH_DEFAULT_SIDEBAR_TAB__`，值为 `{ defaultTab, enabled }`。
-- **与 session-panel 的契约**：`default-sidebar-tab` 的 `DEFAULT_TAB` 与 session-panel
-  注册的 `TAB_KIND` 必须同为 `dsh-session-details`，否则替换后的 tab 无法解析。
-  两者由统一 client 入口组合，无需各自注册独立 Cordis 插件。
+- **不做什么**：不主动展开右边栏（只在用户自己打开、原生播下 guide 时才动）；不在会话
+  已有其它 tab 时插手；不直接读写 `dsh.sidebar-right.v1.<sessionId>` 布局存储；不隐藏、
+  删除、改写任何节点；不注册新 tab、不提供 UI 按钮——只是把原生导航控制器指向一个已注册
+  的 kind。目标 kind 未注册时 `openTab` 会抛错，本模块有限重试后放弃，**保留原生开始页**，
+  界面不会坏。目标 kind 已打开时原生会直接聚焦它，不会开重复。
+- **常用 tab kind**（与 `lib/config.mjs` 的 `KNOWN_KINDS` 同步，仅作提示清单）：
+
+| kind | 展示内容 | 来源 |
+|---|---|---|
+| `dsh-session-details` | 会话详情 | 本套件 session-panel（**默认**） |
+| `session-inspector-log` | 会话数据诊断 | 原生 inspector bundle |
+| `guide` | 开始页（原生入口卡片页） | 原生默认 |
+| `files` | 文件树 | 原生 |
+| `browser` | 浏览器 | 原生 |
+| `terminal` | 终端 | 原生 |
+| `plan` | 计划 | 原生 |
+| `changes-review` | 代码审查和变更 | 原生 |
+| `schedule` | 任务管理 | 原生 |
+| `dsh-context` | 上下文面板 | dsh-context（需已安装） |
+
+  配置任意字符串都可；不在表中的 kind 若已由某插件注册同样能生效，未注册则保留开始页。
+- **自证诊断（无需 UI 截图）**：运行时把事件写进 `localStorage` 的
+  `dsh-default-sidebar-tab:diag` 键（只写自己的键，不碰 `dsh.sidebar-right.*` 布局存储），
+  流程为 `loaded → apply → attached → probe → replaced`；`replaced` 表示原生 `guide`
+  tab 已被换成目标 kind。原生侧栏布局落在 `dsh.sidebar-right.v1.<sessionId>`，替换成功后
+  该会话的 `tabs` 里应只剩目标 kind：
+
+```json
+{"tab3":{"id":"tab3","kind":"dsh-session-details","title":"会话详情"}}
+```
+
+- **探测脚本（非截图验证）**：仓库 `scripts/` 已迁入原 kit 的探测工具。
+  两者都要求 DSH 以对应调试端口启动。
+
+```bash
+node scripts/page-probe.mjs state        # 读页面注入值 + diag 事件 + 布局
+node scripts/page-probe.mjs eval "<js>"  # 在 renderer（dsh-app:// 页面）里执行表达式
+node scripts/cdp-probe.mjs               # 连 host 进程 inspector
+```
+
+  `page-probe.mjs` 连 Electron 的 remote debugging 端口（默认 `9333`，可用
+  `DSH_DEBUG_PORT` 覆盖），需 DSH 以 `--remote-debugging-port=<port>` 启动；
+  `cdp-probe.mjs` 连 host 进程 inspector（默认 `9230`，可用 `DSH_CDP_PORT` 覆盖），
+  用于只读检查插件是否在 cordis 树里、index 注入了哪些全局、web 模块清单是否含本插件。
+- **与 session-panel 的契约**：`default-sidebar-tab` 的 `DEFAULT_TAB`（`lib/config.mjs`）
+  与 session-panel 注册的 `TAB_KIND`（`lib/client-session-panel.js`）必须同为
+  `dsh-session-details`，否则替换后的 tab 无法解析。两者由统一 client 入口组合，无需
+  各自注册独立 Cordis 插件。修改 kind 时需同步这两处。
