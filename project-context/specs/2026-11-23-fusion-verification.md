@@ -491,3 +491,90 @@ host 半**确实被调用**（payload 与 `resolveConfig()` 默认值一致）�
 「guide 被替换」这一动作本身——它目前只有 9/9 本地行为测试支撑，需在 Task 4 的
 最终验证中用全新日志 + 触发 guide 条件重试；若仍无法触发，将如实记为**未实机验证**，
 不以间接字段代替。
+
+## 7. Task 4：合并前的独立复核（发现一个 Critical 缺陷）
+
+BASE `f991b0f`。本节记录主代理在最终合并前对 Task 0–3 全量复检的结论，以及由此产生的
+代码修复与文档撤回。
+
+### 7.1 复核发现的 Critical：`runReplace` 的暂时性死区
+
+`lib/client-default-sidebar-tab.js` 的 `runReplace()` 在两个早退分支里读 `guide.tabId`：
+
+```js
+if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+  if (!skipLogged.has(guide.tabId)) { ... }   // ← 读 guide
+  return;
+}
+if (typeof sidebar.isExpanded === 'function' && sidebar.isExpanded() === false) {
+  if (!skipLogged.has(guide.tabId)) { ... }   // ← 读 guide
+  return;
+}
+const guide = guides[0];                       // ← 却在这里才声明
+```
+
+`const` 在声明前处于暂时性死区，读它是 `ReferenceError`，不是 `undefined`。
+
+**实机佐证**（累积 `.diag.log`，1700 行）：
+
+| stage | 命中 | 说明 |
+|---|---|---|
+| `skip-collapsed` | **0** | 而 `runtime-probe.apiIsExpanded` 在 1396 次采样中**全程为 `false`**；按代码该分支应命中数百次 |
+| `skip-hidden-renderer` | **0** | 同理 |
+| `replaced` | 0 | 见 §6.5-R：观察窗内无「已挂载会话自带 guide」 |
+| `openTab-error` | 0 | 说明异常并非从 `openTab` 抛出，而是更早的 `ReferenceError` |
+
+**最小复现**（6 行，与真实语句顺序一致）：
+
+```js
+function runReplace() {
+  const guides = [{ tabId: 'tab1', sessionId: 'mounted' }].filter((t) => t.sessionId === 'mounted');
+  if (guides.length === 0) return;
+  const skipLogged = new Set();
+  if (true) {                                  // sidebar.isExpanded() === false
+    if (!skipLogged.has(guide.tabId)) { ... }  // 真实代码第 169 行
+  }
+  const guide = guides[0];
+}
+// -> ReferenceError: Cannot access 'guide' before initialization
+```
+
+该异常在订阅回调内抛出并被吞掉，所以用户侧表现为「右栏收起/离屏时该跳过的守卫静默失效」。
+
+**为什么 Task 1–3 没发现**：行为测试的 fake `sidebarRight` 从未提供 `isExpanded`，
+`loadClient()` 的 sandbox 也没有 `document`。两个分支因此**从未被执行过**——测试覆盖了
+替换路径，却没覆盖这两条守卫。
+
+### 7.2 修复（commit `29104fa`）
+
+- 把 `const guide = guides[0]` 提到两个早退分支之前，并加注释说明为何不能放在后面。
+- 重新内联第四个 IIFE 到 `lib/client.js`（仍**只有一个**顶层 `load()`，`grep` 复核：
+  行 9 depth 0，行 39/957/1753/1905 均 depth 3）。
+- 测试补三项，并把缺失的桩补上：`loadClient({ visibilityState })` 提供 `document`，
+  `makeSidebar({ expanded })` 提供 `isExpanded`，以及 `setExpanded()`。
+  新增用例：
+  1. `右栏收起时不替换，且记录 skip-collapsed（不抛 ReferenceError）`
+  2. `右栏展开时同一会话的 guide 照常替换（对照 skip-collapsed）`
+  3. `离屏渲染器（visibilityState:hidden）不替换，记录 skip-hidden-renderer`
+
+**测试有效性自证**：把源文件回退到修复前版本后跑这 3 条，**用例 1 与 3 失败**（`not ok 10`、
+`not ok 12`），恢复修复后 12/12 全通过。若新测试在旧代码上也通过，则说明它没有锁住缺陷。
+
+- `node --test tests/*.test.mjs`：**68 pass / 0 fail**（原 65，新增 3）。
+- `node scripts/verify.mjs --profile ...`：**7/7 PASS**。
+
+### 7.3 复核发现的其他问题（已处理）
+
+| 级别 | 问题 | 处理 |
+|---|---|---|
+| Important | profile 的 `cordis.patch.yml` 仍有一条 `- id: dsh-default-sidebar-tab / name: '@local/dsh-default-sidebar-tab'`，指向 Task 3 已删除的包 | 已删除该条目（备份 `cordis.patch.yml.bak-before-fusion-final-20261123-130615`），配注释说明配置现在走 adapter 的 insert 条目 |
+| Minor | README 仍称 `lib/client.js` 用「静态 `import` 聚合」，与实际的单 `load` + 内联不符 | 已改写为真实结构（commit `72e9770`） |
+| Minor | `lib/client.js` 工作区行尾混用（1921 CRLF + 346 LF，从第 1898 行起为裸 LF） | 已归一为纯 LF；blob 与 HEAD 一致（无内容变更） |
+| Minor | `.host.log` 跨多轮 boot 累积到 2884 行，`[dsh-default-sidebar-tab]` 行无时间戳/pid | 已记入 §6.6 第 5 条；Task 4 最终验证改为从空日志开始 |
+
+### 7.4 至此仍未实机证明的一项
+
+「guide 被替换」这个动作本身。它在实机上从未触发（`replaced` 0 次），现有支撑仅为
+本地行为测试。**不以 `guideReplacedCount` 之类的间接字段替代**（原因见 §6.5-R 的 R3）。
+最终验证会从空日志重试；若仍无法构造出「已挂载会话 + guide tab + 右栏展开 + 渲染器可见」
+的条件，将如实记录为**未实机验证**，而不是写成通过。
