@@ -579,7 +579,7 @@ function runReplace() {
 **测试有效性自证**：把源文件回退到修复前版本后跑这 3 条，**用例 1 与 3 失败**（`not ok 10`、
 `not ok 12`），恢复修复后 12/12 全通过。若新测试在旧代码上也通过，则说明它没有锁住缺陷。
 
-- `node --test tests/*.test.mjs`：**68 pass / 0 fail**（原 65，新增 3）。
+- `node --test tests/*.test.mjs`：**72 pass / 0 fail**（原 65 → 68 为 TDZ 修复新增 3 条；→ 72 为把 cs-panel-hider 断言纳入套件新增 4 条）。
 - `node scripts/verify.mjs --profile ...`：**7/7 PASS**。
 
 ### 7.3 复核发现的其他问题（已处理）
@@ -625,7 +625,7 @@ function runReplace() {
 | 项 | 结果 |
 |---|---|
 | `install.mjs --dry-run` | `already registered, nothing to do`（未执行 `--undo`） |
-| `node --test tests/*.test.mjs` | **68 pass / 0 fail** |
+| `node --test tests/*.test.mjs` | **72 pass / 0 fail** |
 | `node scripts/verify.mjs` | **7/7 checks passed** |
 | `git submodule status` / `.gitmodules` | 空 / 不存在 |
 | `cs-panel-hider/`、`default-sidebar-tab/`、`session-panel/` | 三个子目录均不存在 |
@@ -702,7 +702,58 @@ function runReplace() {
 | kit 提交历史保留（经 subtree merge 成为 main 祖先） | ✅ 已验证（`9faa382` 等可达） |
 | 单次 boot 内四插件 host + client 半均执行 | ✅ 已验证（各自专属 stage） |
 | 同源路由全部可用 | ✅ 已验证（200/204） |
-| 68/68 测试、verify 7/7 | ✅ 已验证 |
+| 72/72 测试、verify 7/7 | ✅ 已验证 |
 | guide→详情 替换动作 | ⚠️ **未实机验证**（触发条件未出现；仅本地测试覆盖） |
 | 空目录 `dsh-session-panel-kit/` | ⚠️ 被 Typora pid 3716 占用，未能删除；git 已不跟踪任何 kit 文件 |
 | `--compose`（需 `dsh` CLI） | — 本机无 CLI，未运行 |
+## 9. 最终审查（Task 4 Step 5）发现与处理
+
+### 9.1 测试覆盖缺口：cs-panel-hider 的断言不在测试套件里
+
+`tests/cs-panel-hider-mock-client.mjs` 是一份**独立的 `*.mjs` 脚本**，不是 `*.test.mjs`，
+因此 `node --test tests/*.test.mjs` 从不收集它。它里面的全部断言——模块 id、`inject` 为空、
+`apply` 返回 disposer、CSS 含两个选择器与 `display:none!important`、body 标记被清理——
+**从未计入测试总数**。这份文件在融合过程中被原样搬过来（`ef1b722`），也就原样保留了这个
+盲区：它看起来"有测试"，实际不在 CI/套件覆盖内。
+
+处理：新增 `tests/cs-panel-hider-client-behavior.test.mjs`，4 条标准 `test` 用例，
+覆盖同一契约并额外验证 disposer 真的断开了 `MutationObserver`（原脚本没有检查这一点）。
+脚本本身保留，因为它还输出 `cssBytes`（看 CSS 改动大小时有用）且被本文件引用。
+
+测试总数：**65 → 68**（TDZ 修复新增 3 条）**→ 72**（本次新增 4 条），全部通过。
+
+### 9.2 逐模块覆盖对比（72 条）
+
+| 文件 | 用例数 | 覆盖对象 |
+|---|---|---|
+| `client.test.mjs` | 13 | 融合入口 `lib/client.js`：四模块自证数组、单 `load`、adapter 行为 |
+| `default-sidebar-tab-client-behavior.test.mjs` | 12 | tab 替换全流程 + 两个守卫分支（TDZ 回归） |
+| `default-sidebar-tab-config.test.mjs` | 15 | `lib/config.mjs` 纯逻辑 |
+| `default-sidebar-tab-contract.test.mjs` | 7 | client 不越界（不改布局存储、不引用第三方） |
+| `cs-panel-hider-client-behavior.test.mjs` | 4 | cs-panel-hider client 契约与隐藏规则 |
+| `ledger.test.mjs` / `proxy.test.mjs` | 9 / 7 | adapter host 半 |
+| `tokens.test.mjs` | 5 | session-panel token 计价 |
+
+### 9.3 已确认无问题（独立复核，非仅采信实现者报告）
+
+- `package.json`：8 条 `exports` 的目标文件**全部存在**；`files[]` 9 项**全部存在**；
+  `dsh.client.inject` 5 项；`dsh.bundle.patch` 指向 `./cordis.patch.yml`。
+- `cordis.patch.yml`：唯一一条 `insert`，`id: dsh-ui-adapter`。
+- `lib/client.js`：顶层唯一 `load()` 在行 9（brace depth 0），其余四条在行 39/957/1753/1905
+  （depth 3）；无 `import`/`export`；无 `window` 遮蔽；`finally` 恢复真实 loader。
+- 四个内联区段与各自源文件**逐字节相同**（去掉重复的 license 头）：
+  39-948 / 957-1744 / 1753-1896 / 1905-2251。
+- `TAB_KIND` 与 `DEFAULT_TAB` 在源文件与内联副本中均为 `dsh-session-details`。
+- kit 的 35 个文件全部有归宿：20 个平铺为根文件，15 个合并进 3×`package.json`、
+  3×`cordis.patch.yml`、3×`README.md`、2×`.gitignore`、3×`.gitattributes`；**零孤儿**。
+- `HEAD` 是真合并（父 `f0ba5ef` + `24134e6`）；`9faa382`/`04a681c`/`dcdae82`/`ab3eda2`
+  均为祖先。
+- 24 个未跟踪文件数量与名单与基线逐项一致。
+- profile 已无任何 `@local/*` 依赖或 bundle 条目；`cordis.patch.yml` 中 `@local` 仅出现在
+  说明注释里。
+
+### 9.4 审查代理的局限（如实记录）
+
+本次为 Task 3 与 Task 4 各派出一次 reviewer 子代理，**两次都在运行中长时间无产出并最终
+未返回报告**（Task 1 也出现过同样情况）。因此本节的审查结论由主代理独立完成，
+不声称"通过了子代理审查"。已发出的两次派出请求与其后的两次催促都留在会话记录中。
