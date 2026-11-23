@@ -1,4 +1,3 @@
-
 # DSH UI Adapter
 
 **为 DeepSeek Harness（DSH）提供统一的会话与上下文界面增强。**
@@ -249,7 +248,7 @@ verify.mjs 是只读安装检查，不会修改 profile、dsh-context 或 billio
 | GET /__ctx-bili/sessions | 读取 billion 会话账本 |
 | GET /__ctx-bili/status | 查看账本地址发现状态与路由命中数 |
 | POST /__ctx-bili/diag | 接收账本适配器的 Client 诊断 |
-| GET /__dsh-session-panel?id=<sessionId> | 读取指定会话的详情数据 |
+| GET /__dsh-session-panel?id=SESSION_ID | 读取指定会话的详情数据 |
 | POST /__dsh-session-panel/diag | 写入会话详情与默认 tab 的诊断 |
 | POST /__dsh-cs-panel-hider/diag | 写入旧详情栏隐藏器的诊断 |
 
