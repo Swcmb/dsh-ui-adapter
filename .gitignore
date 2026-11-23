@@ -2,3 +2,6 @@
 node_modules/
 *.log
 .DS_Store
+# SDD (subagent-driven development) working artifacts: briefs, reports, review diffs,
+# progress ledger, and archived boot logs. Never part of the deliverable.
+.superpowers/
