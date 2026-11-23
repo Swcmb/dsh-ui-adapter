@@ -403,20 +403,37 @@ inspector CDP `127.0.0.1:9230`、`172.27.16.1:57725`。启动输出无 error 级
 
 ### 6.5 四插件实机证据（重启后，统一 PID 46980）
 
+> **本节初版存在三处证据缺陷，已由主代理在 Task 4 复核中撤回并重写（见 §6.5-R）。
+> 下面保留的是更正后的表述；被撤回的说法在 §6.5-R 中列明，不要再引用。**
+
 **default-sidebar-tab（新增）**
 
-- `.host.log`：`[dsh-default-sidebar-tab] apply:enter {"defaultTab":"dsh-session-details","enabled":true}`
-  与 `[dsh-default-sidebar-tab] bind:index-inject {"name":"__DSH_DEFAULT_SIDEBAR_TAB__"}` 各出现 3 次，
-  均位于统一 `apply:enter`（04:07:36.846Z）之后——证明 host 半在融合入口内真实执行。
-- `POST /__dsh-session-panel/diag` 落盘的 `.diag.log` stage（04:07:53Z 起）：
-  `loaded`×1（04:07:53.036Z）、`apply`×1（04:07:55.140Z，`hasInject/hasGet/hasEffect`）、
-  `attached`×1（04:07:55.570Z，`defaultTab:'dsh-session-details', enabled:true`）、
-  `probe`×2（含 `guideTabs`）、`runtime-probe`×109、`rightbar-width-set`×1（`width:300`）。
-- `replaced` stage 未出现：观察窗内唯一的 guide tab 属于未挂载会话
-  `session-32fecaee-7a5e-49ef-bbd8-c009fea7db9b`（`probe.mineGuides:[]`），
-  而当前挂载会话 `session-723f...` 没有 guide；按 client 逻辑
-  （`lib/client-default-sidebar-tab.js:139` 只处理 `t.sessionId === mounted`）这是正确行为。
-  替换路径由 9/9 本地行为测试覆盖，历史 `state-probe.guideReplacedCount:3` 亦显示此前已生效。
+- `.host.log` 的 `[dsh-default-sidebar-tab] apply:enter` / `bind:index-inject` 行**没有时间戳、
+  没有 pid**，这是该 host 半自己的 `log()`（`lib/host-default-sidebar-tab.mjs:14-20`）写法，
+  与 adapter 的 `hostlog.mjs:34`（含 `toISOString` + `pid=`）不同。因此**不能**用行号相邻
+  关系断言它们「位于统一 `apply:enter` 之后」——初版正是这样断言的，已被撤回。
+  可确认为真的部分：这些行**确实存在**，且 `apply:enter` 的 payload
+  `{"defaultTab":"dsh-session-details","enabled":true}` 与该 host 半 `resolveConfig()` 的
+  输出一致（`lib/config.mjs` 默认 `DEFAULT_TAB`），说明 host 半被调用并拿到有效配置。
+- ⚠️ 计数不能作为「融合成功」的证据：`verify.mjs` 的 check 4 与 check 5 **各自** `import`
+  profile 里的 `lib/index.js` 并调用一次 `mod.apply({...})`（`scripts/verify.mjs:82,99`），
+  每次 verify 运行都会往 `.host.log` 追加 **2 组** tab 行。日志中出现的 3 对（2812/2814、
+  2821/2859-2862 区间、2890/2892）对应 3 次 verify 运行，**与进程内重复注册无关**，
+  也与 DSH 的真实 boot 无关。判断融合是否生效必须用 `.diag.log`（client 半）而非此处计数。
+- `.diag.log` 的 default-sidebar-tab 专属 stage（payload 含 `hasGet`，区别于 session-panel
+  的 `hasSlots`）：`loaded` 与 `apply` 成对出现 8 次（03:14:28 → 04:07:55），`attached` 8 次，
+  `probe` 15 次，`rightbar-width-set` 9 次，`runtime-probe` 1396 次。**最近一次**
+  （即 PID 46980 这一轮）为：`loaded` 04:07:53.036Z、`apply` 04:07:55.246Z、
+  `attached` 04:07:55.570Z（`defaultTab:'dsh-session-details', enabled:true`）。
+- `replaced` stage 在整个 `.diag.log` 中为 **0 次**。归因：观察窗内唯一的 guide tab 属于
+  未挂载会话 `session-32fecaee-...`（`probe.mineGuides:[]`），当前挂载会话 `session-723f...`
+  没有 guide；按 `lib/client-default-sidebar-tab.js:139`（只处理 `t.sessionId === mounted`）
+  这属正确行为。**替换路径的真实性由 9/9 本地行为测试覆盖，不由实机日志覆盖**——
+  初版引用 `state-probe.guideReplacedCount:3` 作为「此前已生效」的旁证是**无效的**：
+  该字段的定义是 `mine.filter((s) => !s.guidePresent).length`
+  （`lib/client-session-panel.js:595`），只说明「已注册 details 的会话里当前没有 guide tab」，
+  这个状态同样可以由「用户自己关掉 guide」或「guide 从未播种」造成，不能证明是
+  default-sidebar-tab 替换的。该旁证已撤回。
 - CDP `/json/list` 只暴露 `dsh://host`（9230），无 `dsh-app://` renderer 目标，
   无法直读页面 `__DSH_DEFAULT_SIDEBAR_TAB__`；注入值以 host 日志与 client `attached.defaultTab`
   为准（详见 6.6）。
@@ -454,3 +471,23 @@ inspector CDP `127.0.0.1:9230`、`172.27.16.1:57725`。启动输出无 error 级
 3. 最外层空目录 `dsh-session-panel-kit/` 仍被 Typora（PID 3716）占用，未能删除；
    全部跟踪文件与 kit 子目录内容已删除，submodule 为空。
 4. 尝试点击 DSH「新会话」按钮未触发新的 guide 播种，未产生 `replaced`；未继续改动 UI 状态。
+5. **`.host.log` 是跨多次 boot 的累积文件**（2884 行，pid 92060 → 60748 等十余轮），
+   `[dsh-default-sidebar-tab]` 行又没有 pid/时间戳。任何基于该文件的时序断言都必须
+   先轮转日志，否则会重演 Task 1 的错误归因。Task 4 的最终验证已改为从空日志开始。
+
+### 6.5-R 撤回记录（Task 4 复核发现）
+
+Task 3 报告与 §6.5 初版共有三处不成立的论断，均在 Task 4 独立复核中撤回：
+
+| # | 初版说法 | 为何不成立 | 证据 |
+|---|---|---|---|
+| R1 | 「`apply:enter`/`bind:index-inject` 各出现 3 次，**均位于**统一 `apply:enter`（04:07:36.846Z）**之后**」 | 这 14 行（7 组）**没有时间戳也没有 pid**；行号相邻不构成时序证明。首个 tab 对（2812-2815）在文件里位于 2816 行的统一 `apply:enter` **之前**。 | `lib/host-default-sidebar-tab.mjs:14-20` 的 `log()` 不含 `toISOString`/`pid`；`.host.log:2812-2822` |
+| R2 | 「出现 3 次」被当作融合生效的佐证 | 3 组 = 3 次 `verify.mjs` 运行 × 每次 2 组；`verify.mjs` 的 check 4 与 check 5 各自 import `lib/index.js` 并调 `apply` 一次。这是测试副作用，不是 DSH boot 证据。 | `scripts/verify.mjs:82,99` |
+| R3 | 「历史 `state-probe.guideReplacedCount:3` 亦显示替换此前已生效」 | 该字段 = `mine.filter((s) => !s.guidePresent).length`，只表示「有 details 的会话当前没有 guide」，无法区分是本插件替换的、用户关掉的、还是从未播种。 | `lib/client-session-panel.js:595` |
+
+**结论的性质**：default-sidebar-tab 的 client 半在 PID 46980 这一轮**确实执行了**
+（`loaded`→`apply`→`attached` 的 payload 含 `defaultTab` 且 `hasGet` 区分于 session-panel），
+host 半**确实被调用**（payload 与 `resolveConfig()` 默认值一致）。**未被实机证明**的是
+「guide 被替换」这一动作本身——它目前只有 9/9 本地行为测试支撑，需在 Task 4 的
+最终验证中用全新日志 + 触发 guide 条件重试；若仍无法触发，将如实记为**未实机验证**，
+不以间接字段代替。
