@@ -192,20 +192,24 @@ node scripts/verify.mjs --profile "D:/ai-configs/runtime/dsh/profiles/desktop"
 
 清 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` → `CloseMainWindow()` → 15s → `Stop-Process -Force` → `Start-Process` → 32s。
 
-- 新 PID：`41168, 49556, 54796, 55120, 55940`；Web 端口 `57719`；CDP `9230`。
+- 新 PID：`39080, 43876, 54704, 54780, 55828`；Web 端口 `53564`；CDP `9230`。
 - `GET /__ctx-bili/status` → 200；`hits.sessions=4, status=2, diag=1`。
 - `.host.log`（新 PID）：`apply:enter`、`bind:routes-ok`、三条 `/__ctx-bili/*` 的 `route:hit`、`client:diag`。
 - `.diag.log` 中出现**仅 session-panel 会产生**的 stage（已与 default-sidebar-tab 的 stage 集合区分）：
 
   | stage | 次数 | 说明 |
   |---|---|---|
-  | `registered` | 2 | `sidebarRightTabs` 注册 `dsh-session-details` 成功 |
-  | `header-toggle-registered` | 2 | 头部开关注册成功 |
-  | `sidebar-right-injected` | 2 | 原生导航控制器注入 |
-  | `guide-entries` | 2 | 入口引导注册 |
-  | `state-probe` | 18 | `withDetails=3, detailsActiveCount=3, guideReplacedCount=3`，`kinds=['dsh-session-details']` |
+  | `registered` | 4 | `sidebarRightTabs` 注册 `dsh-session-details` 成功 |
+  | `header-toggle-registered` | 4 | 头部开关注册成功 |
+  | `sidebar-right-injected` | 4 | 原生导航控制器注入 |
+  | `guide-entries` | 4 | 入口引导注册 |
+  | `state-probe` | 78 | `withDetails=3, detailsActiveCount=3, guideReplacedCount=3`，`kinds=['dsh-session-details']` |
 
   这证明融合后的 session-panel client 已真实执行并注册 tab 类型；此前错误归因已作废。
+
+### 4.4.1 reviewer 追加的 Important 问题（已修复）
+
+首版聚合 factory 用局部 `const window = { __ModuleLoader__: { load } }` 遮蔽真实 `window`，会让内联 factory 里的 `window.addEventListener` / `innerWidth` / `localStorage` 等真实 API 失效（账本面板与 state-probe 依赖它们）。已改为**只临时替换 `window.__ModuleLoader__` 并在 `finally` 中恢复**，真实 `window` 全程不动。修复后再次干净重启复验：PID `39080, 43876, 54704, 54780, 55828`，端口 `53564`，`state-probe` 78 次且仍带完整 DOM 快照（`withDetails=3 / detailsActiveCount=3 / guideReplacedCount=3`），adapter `client:diag` 正常。
 
 ### 4.5 结论与限制
 
