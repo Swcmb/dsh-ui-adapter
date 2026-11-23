@@ -148,19 +148,56 @@ export function apply(ctx, rawConfig = {}) {
 | `LICENSE` × 3 | 三个插件各一份 GPL-3.0-or-later，按来源重命名为 `LICENSE-session-panel` / `LICENSE-cs-panel-hider` / `LICENSE-default-sidebar-tab`，全部保留；父仓库 `COPYING` 不动 |
 | `.gitmodules` | 删除 |
 
-## 5. Git 历史保留方案（分支合并到主分支）
+## 5. 逐个融合 + 逐个验证 + 逐个提交（用户 2026-11-23 追加要求）
 
-1. `git -C D:/dsh-ui-adapter checkout -b agent/fuse-kit-into-root main`
-2. `git -C D:/dsh-ui-adapter fetch D:/dsh-ui-adapter/dsh-session-panel-kit main`（本地路径，不联网），记下 `FETCH_HEAD`
-3. **提交 1 — subtree merge**：在分支上把 kit 历史并入并保留原始文件结构：
-   - `git merge -s ours --no-commit --allow-unrelated-histories FETCH_HEAD` 建立 merge 关系但不带入文件树
-   - `git read-tree --prefix=dsh-session-panel-kit/ -u FETCH_HEAD` 把 kit 内容以原路径写入工作区
-   - 提交：`chore: merge dsh-session-panel-kit history (subtree)`
-   - 此时 kit 的 ~20 条提交全部成为该 merge commit 的第二父链祖先
-4. **提交 2 — 融合重构**：按第 3、4 节把内容平铺到根、删除三个子文件夹与 kit 目录、改入口、重写冲突文件，git add 全部改动后提交：`refactor: fuse four plugins into single flat package`
-5. `git checkout main && git merge --no-ff agent/fuse-kit-into-root -m "Merge branch 'agent/fuse-kit-into-root': fuse kit into root"`
+**流程硬要求**：不一次性融合三个插件。每融合一个插件 → 提交 git → 重装 + 实机验证该插件 → 提交 git → 再融合下一个。全部完成后再做一次全量重装 + 全量验证。
 
-最终 `main` 历史中：kit 提交是祖先、有一个 subtree merge commit、有一个 `--no-ff` 分支合并 commit。
+### 5.1 分支与历史
+
+- 实施分支：`agent/fuse-kit-into-root`（已从 main 创建，设计文档已提交 `d5a7b88`）。
+- **kit 完整历史一次性并入**：在第一个插件融合前做 subtree merge 把 kit 的 ~20 条提交作为祖先并入分支（历史保留不拆分），之后三个插件的逐个融合都是在这个带完整历史的基础上做文件级平铺。这样既满足"一个一个融合"，又满足"保留全部 git 记录通过分支合并"。
+  - `git remote add kit D:/dsh-ui-adapter/dsh-session-panel-kit`（本地路径）→ `git fetch kit main`
+  - `git rm --cached dsh-session-panel-kit`（删 gitlink，保留工作区文件）
+  - `git merge -s ours --no-commit --allow-unrelated-histories kit/main` → `git read-tree --prefix=dsh-session-panel-kit/ -u kit/main` → 提交 `chore: merge kit history (subtree)`
+  - 验证：`git log --oneline` 能看到 kit 的 ~20 条提交
+
+### 5.2 三个插件各自的融合-验证-提交循环
+
+按顺序逐个处理，每个插件严格走完 5 步再进入下一个：
+
+**插件 1：session-panel**
+
+| 步 | 动作 | git 提交 |
+|---|---|---|
+| 1 融合 | 把 `dsh-session-panel-kit/session-panel/` 的内容平铺到根：`lib/client.js`→`lib/client-session-panel.js`（原样）、`lib/index.mjs`→`lib/host-session-panel.mjs`（apply 改名）、`tokens.mjs` 入 `lib/`、`tests/*` 入根 `tests/`（mock-client 改名）、`NOTICES.md` 入根、`LICENSE`→`LICENSE-session-panel`。**更新统一 `lib/client.js` 与 `lib/index.js` 只聚合 adapter + session-panel 两个模块**（另两个尚未融合）。重写 README（加入 session-panel 章节）、.gitignore、package.json、cordis.patch.yml。删除 `session-panel/` 子目录。 | `refactor: fuse session-panel into root` |
+| 2 重装验证 | 按 §7.2 重装 + 重启 DSH + 实机验证 session-panel 功能（§7.3） | — |
+| 3 提交验证结果 | 把验证证据（diag 输出、DOM 检查、命令输出）记入 `project-context/specs/` 下验证记录（如 `2026-11-23-fusion-verification.md`），或作为空提交 `chore: verify session-panel fusion` | `chore: verify session-panel fusion` |
+
+**插件 2：cs-panel-hider**（同上 5 步）
+
+| 步 | 动作 | git 提交 |
+|---|---|---|
+| 1 融合 | 平铺 cs-panel-hider：`client.js`→`client-cs-panel-hider.js`、`index.mjs`→`host-cs-panel-hider.mjs`、`LICENSE`→`LICENSE-cs-panel-hider`。**统一入口更新为聚合 adapter + session-panel + cs-panel-hider 三个模块**。README 加入 cs-panel-hider 章节。删除子目录。 | `refactor: fuse cs-panel-hider into root` |
+| 2 重装验证 | 重装 + 重启 + 实机验证 cs-panel-hider 功能 + 已融合的两个插件回归 | — |
+| 3 提交验证结果 | `chore: verify cs-panel-hider fusion` | `chore: verify cs-panel-hider fusion` |
+
+**插件 3：default-sidebar-tab**（同上 5 步）
+
+| 步 | 动作 | git 提交 |
+|---|---|---|
+| 1 融合 | 平铺 default-sidebar-tab：`client.js`→`client-default-sidebar-tab.js`、`index.mjs`→`host-default-sidebar-tab.mjs`、`config.mjs` 入 `lib/`、`scripts/*` 入根 `scripts/`、`tests/*` 入根 `tests/`、`LICENSE`→`LICENSE-default-sidebar-tab`。**统一入口更新为聚合全部四个模块**。README 加入 default-sidebar-tab 章节；确认 `TAB_KIND` 与 `DEFAULT_TAB` 仍为 `dsh-session-details`。删除子目录与 kit 空目录。 | `refactor: fuse default-sidebar-tab into root` |
+| 2 重装验证 | 重装 + 重启 + 实机验证 default-sidebar-tab 功能 + 前三个插件回归 | — |
+| 3 提交验证结果 | `chore: verify default-sidebar-tab fusion` | `chore: verify default-sidebar-tab fusion` |
+
+### 5.3 合并回主分支
+
+全部三个插件逐个融合并验证通过后：
+
+1. `git checkout main && git merge --no-ff agent/fuse-kit-into-root -m "Merge branch 'agent/fuse-kit-into-root': fuse kit into root"`
+2. 按 §7.2 做**最终一次**重装 + 重启 + 全量实机验证（§7.3 完整矩阵）。
+3. 最终验证证据提交到 main：`chore: verify full fusion on main`。
+
+最终 `main` 历史：kit 提交是祖先 + subtree merge commit + 三个 `refactor: fuse *` + 三个 `chore: verify *` + 一个 `--no-ff` 分支合并 commit + 最终验证提交。
 
 ## 6. 验证清单
 
@@ -177,13 +214,14 @@ export function apply(ctx, rawConfig = {}) {
 | 9 | `node --test tests/*.test.mjs` | 全部通过（合并后的测试集） |
 | 10 | 运行时 client 注入验证（CDP 或 profile 重载） | 四个模块 id 均被加载；四个 diag 通道均有响应 |
 | 11 | 未跟踪文件比对 | `_*.tsx` / `_*.js` / `*.txt` 与操作前逐字节一致 |
-| 12 | 本机重装 + 实机验证 | 按 §7 完成 reinstall、DSH 重启、四插件功能矩阵全部通过 |
+| 12 | 每个插件融合后重装 + 实机验证 | 按 §5.2 每个插件融合后重装验证该插件 + 回归，全部通过并提交 |
+| 13 | 最终全量重装 + 实机验证 | 按 §5.3 合并回 main 后，按 §7 完成最终 reinstall、DSH 重启、四插件功能矩阵全部通过 |
 
 第 10 或 12 项失败时按 §4.1 降级方案把四个 IIFE 内联进 `lib/client.js`，重跑验证。
 
 ## 7. 本机重新安装 + 实机验证（用户 2026-11-23 追加要求）
 
-融合完成后，在**本机 DSH 桌面端重新安装并实机验证所有功能**。这一步是交付门禁，不是可选项。
+每个插件融合后（§5.2）以及最终全部融合后（§5.3），都要在**本机 DSH 桌面端重新安装并实机验证功能**。这一步是交付门禁，不是可选项。重装流程对每个插件与最终全量验证都同样适用。
 
 ### 7.1 安装环境事实（已实测）
 
@@ -213,7 +251,7 @@ export function apply(ctx, rawConfig = {}) {
 | session-panel | 右侧栏「会话详情」tab 注册、guide 卡片、kind `dsh-session-details` | `ctx.sidebarRightTabs` 注册表含该 kind；`session-panel` diag 通道有 `route:hit` |
 | cs-panel-hider | `dsh-claude-style` 详情面板与顶部图标被 CSS 隐藏 | computed style 断言（`.dsh-claude-details-root` display:none）；`/__dsh-cs-panel-hider/diag` 有事件落盘 |
 | default-sidebar-tab | 右侧栏打开默认显示 `dsh-session-details` | DOM 检查默认 tab kind；client 半 `apply:enter` 日志（该插件 host 无 diag 路由） |
-| 四者共存 | 四个 client 模块 id 均加载、四个 host apply 均执行、无 JS 报错 | DSH console 无 error；四个 diag 通道均有响应；`.host.log` 四段日志齐全 |
+| 逐阶段回归 | 每个插件融合后，验证该插件 + 已融合插件均正常；最终验证四者共存 | DSH console 无 error；已融合插件的 diag 通道均有响应；`.host.log` 对应日志齐全 |
 
 验证手段优先级：`scripts/verify.mjs --compose`（只读静态校验）→ 运行时 diag 端点（程序化）→ CDP 只读 DOM/计算样式。截图仅作辅助，不作为通过标准。
 
