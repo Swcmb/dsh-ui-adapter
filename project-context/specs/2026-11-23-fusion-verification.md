@@ -347,3 +347,110 @@ GET /__ctx-bili/diag              -> 204（该路由仅接受 POST）
   本次 CSS 隐藏结论来自 client 自身在真实页面读取 computed style 的 diag 断言，不依赖截图。
 - 顶部开关 `.dsh-claude-session-panel-button` 在首次 probe 时不存在、第二次出现且已被隐藏，
   属 dsh-claude-style 自身渲染时序，不影响结论。
+
+## 6. Task 3：融合 default-sidebar-tab（第四个插件）
+
+BASE `7ac71af`；第一次提交 `c1a509800c2f4d125f2bb8049fff85d8a60bfc48`
+（`refactor: fuse default-sidebar-tab into root`）。
+
+### 6.1 实现要点
+
+- `lib/client-default-sidebar-tab.js`、`lib/host-default-sidebar-tab.mjs`、`lib/config.mjs`、
+  `LICENSE-default-sidebar-tab`、`scripts/cdp-probe.mjs`、`scripts/page-probe.mjs` 及三项
+  测试平铺到仓库根；测试文件名加 `default-sidebar-tab-` 前缀避免与既有测试重名，内部
+  路径改指向新文件。测试 mock 补 `setInterval` / `clearInterval`（client 用只读轮询探针），
+  契约测试改为校验融合根包形态。
+- `lib/client.js` 顶层仍**只有一个** `window.__ModuleLoader__.load({id:'@ianwusb/dsh-ui-adapter'})`；
+  第四个 IIFE 内联在 factory 内、cs-panel-hider 之后、footer 之前。`window` 未被遮蔽：
+  factory 只临时替换 `window.__ModuleLoader__` 并在 `finally` 恢复。
+- `lib/index.js` 追加 `applyDefaultSidebarTab(ctx, rawConfig)`；host 导出名由 `apply` 改为
+  `applyDefaultSidebarTab`。`package.json` 新增 `./client-default-sidebar-tab`、`./config`
+  导出与 `LICENSE-default-sidebar-tab`；`cordis.patch.yml` 未改（单一 insert）。
+- `TAB_KIND`（session-panel）与 `DEFAULT_TAB`（default-sidebar-tab / `lib/config.mjs`）均为
+  `dsh-session-details`，`grep` 校验一致。
+
+### 6.2 本地验证（实跑输出）
+
+- `node --test tests/*.test.mjs`：**65 tests / 65 pass / 0 fail**。
+- `node --test tests/default-sidebar-tab-client-behavior.test.mjs`：9/9 pass，覆盖
+  `loaded` → `attached` → `replaced`（`replaceTab` 原位替换、只处理当前会话、错误重试、
+  `enabled:false` 不动作）。
+- `tests/client.test.mjs` 断言 `__DSH_UI_ADAPTER_CLIENT_MODULES__`
+  = `['@ianwusb/dsh-ui-adapter','@local/dsh-session-panel','@local/dsh-cs-panel-hider','@local/dsh-default-sidebar-tab']`，
+  且 `descriptors.length === 1`（无第二个顶层 `load()`）。
+- `node scripts/install.mjs --profile ... --dry-run` → `already registered, nothing to do`。
+- `node scripts/verify.mjs --profile ...` → **7/7 checks passed**（`--compose` 的 `dsh` CLI
+  本机不可用，未运行）。
+
+### 6.3 profile 清理与 kit 删除
+
+- 备份 `D:/ai-configs/runtime/dsh/profiles/desktop/package.json` → `package.json.bak-before-fusion-cleanup`。
+- 仅剩的 `@local/dsh-default-sidebar-tab` 已从 `dependencies` 与 `dsh.profile.bundles` 移除；
+  未使用 `install.mjs --undo`。`node_modules/@local/dsh-default-sidebar-tab` junction
+  以 `fsutil reparsepoint delete` + 删除空壳的方式移除，未触及目标目录内容。
+- `dsh-session-panel-kit/` 的 16 个 git 跟踪文件已 `git rm -r` 删除，`.host.log` 残留与空子目录
+  已清除；`git submodule status` 为空。**遗留**：最外层空目录 `dsh-session-panel-kit/`
+  因 Typora（PID 3716，打开着已删除的 kit README.md）持有句柄而无法移除；目录内已无任何文件，
+  git 视角该子模块已完全消失（详见 6.6）。
+
+### 6.4 DSH 重启
+
+PowerShell 中先清空 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS`（两者均为空）→
+CloseMainWindow（PID 2632）→ 15s 后 5 个旧进程仍残留 → `Stop-Process -Force` →
+`Start-Process -FilePath 'D:\ProgramFiles\DSH\DeepSeek Harness.exe' -WorkingDirectory 'D:\ProgramFiles\DSH'`
+→ 28s。新 PID：`55316, 45000, 54788, 12888, 46980`；Web `127.0.0.1:57672`（owner 46980）、
+inspector CDP `127.0.0.1:9230`、`172.27.16.1:57725`。启动输出无 error 级行。
+
+### 6.5 四插件实机证据（重启后，统一 PID 46980）
+
+**default-sidebar-tab（新增）**
+
+- `.host.log`：`[dsh-default-sidebar-tab] apply:enter {"defaultTab":"dsh-session-details","enabled":true}`
+  与 `[dsh-default-sidebar-tab] bind:index-inject {"name":"__DSH_DEFAULT_SIDEBAR_TAB__"}` 各出现 3 次，
+  均位于统一 `apply:enter`（04:07:36.846Z）之后——证明 host 半在融合入口内真实执行。
+- `POST /__dsh-session-panel/diag` 落盘的 `.diag.log` stage（04:07:53Z 起）：
+  `loaded`×1（04:07:53.036Z）、`apply`×1（04:07:55.140Z，`hasInject/hasGet/hasEffect`）、
+  `attached`×1（04:07:55.570Z，`defaultTab:'dsh-session-details', enabled:true`）、
+  `probe`×2（含 `guideTabs`）、`runtime-probe`×109、`rightbar-width-set`×1（`width:300`）。
+- `replaced` stage 未出现：观察窗内唯一的 guide tab 属于未挂载会话
+  `session-32fecaee-7a5e-49ef-bbd8-c009fea7db9b`（`probe.mineGuides:[]`），
+  而当前挂载会话 `session-723f...` 没有 guide；按 client 逻辑
+  （`lib/client-default-sidebar-tab.js:139` 只处理 `t.sessionId === mounted`）这是正确行为。
+  替换路径由 9/9 本地行为测试覆盖，历史 `state-probe.guideReplacedCount:3` 亦显示此前已生效。
+- CDP `/json/list` 只暴露 `dsh://host`（9230），无 `dsh-app://` renderer 目标，
+  无法直读页面 `__DSH_DEFAULT_SIDEBAR_TAB__`；注入值以 host 日志与 client `attached.defaultTab`
+  为准（详见 6.6）。
+
+**adapter（回归）**
+
+- `GET /__ctx-bili/status` → 200：
+  `{"origin":"http://127.0.0.1:18787","pid":19864,"live":true,"source":"instance-file","hits":{"/__ctx-bili/sessions":10,"/__ctx-bili/status":3,"/__ctx-bili/diag":2}}`，三条路由命中均 > 0。
+- `GET /__ctx-bili/sessions` → 200（155 个会话）；`POST /__ctx-bili/diag` → 204。
+- `.host.log` 新 PID 46980：`client:diag` 从
+  `04:07:56.589Z {"match":"fallback","shim":"none","sessionCount":155}` 转为
+  `04:08:30.257Z {"match":"exact","shim":"active","id":"session-723f62c7-...","sessionCount":155,"usage":true}`，
+  垫片正常接管。04:08:45.150Z 的一条 `{"stage":"verify-probe"}` 是本次验证主动 POST 的探针。
+- 统一 host `apply:enter` → `bind:index-inject` → `bind:routes-ok` → `bind:effect-owned` → `apply:exit` 完整。
+
+**session-panel（回归）**
+
+- `.diag.log`：`registered`×1
+  （`{"tabId":"@local/dsh-session-panel","kind":"dsh-session-details","disposers":3}`）、
+  `guide-entries`×1（`mineCount:1`）、`sidebar-right-injected`×1（`hasToggle:true`）、
+  `header-toggle-registered`×1、`state-probe`×31
+  （首个 `sessionCount:14, withDetails:3, detailsActiveCount:3, guideReplacedCount:3`）。
+
+**cs-panel-hider（回归）**
+
+- `.diag.log`：`style-installed`×1（`styleId:'dsh-cs-panel-hider-style'`）、`hide-probe`×2，
+  两次均 `styleInstalled:true, styleHasRule:true`，目标节点存在时
+  `display:'none', visibility:'hidden', hidden:true`，`bodyPanelFlag:false`。
+
+### 6.6 限制与关注
+
+1. `replaced` stage 未在实机窗口出现，原因如上（无挂载会话自带 guide），非功能失败。
+2. CDP 只暴露 host realm，无法直连 renderer DOM/console；页面全局注入值以 host `bind:index-inject`
+   日志与 client `attached` diag 为准。
+3. 最外层空目录 `dsh-session-panel-kit/` 仍被 Typora（PID 3716）占用，未能删除；
+   全部跟踪文件与 kit 子目录内容已删除，submodule 为空。
+4. 尝试点击 DSH「新会话」按钮未触发新的 guide 播种，未产生 `replaced`；未继续改动 UI 状态。
