@@ -1,0 +1,4 @@
+# Client-only patch: seed the right sidebar's default tab via native ctx.sidebarRight.
+- insert:
+    - id: dsh-default-sidebar-tab
+      name: '@local/dsh-default-sidebar-tab'

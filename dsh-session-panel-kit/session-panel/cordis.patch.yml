@@ -1,0 +1,4 @@
+# Host half + client half. Mirrors the registration shape used by dsh-ui-adapter.
+- insert:
+    - id: dsh-session-panel
+      name: '@local/dsh-session-panel'

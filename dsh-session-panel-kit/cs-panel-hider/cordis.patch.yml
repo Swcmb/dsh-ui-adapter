@@ -1,0 +1,4 @@
+# Client-only patch: hide dsh-claude-style's details rail and its header toggle.
+- insert:
+    - id: dsh-cs-panel-hider
+      name: '@local/dsh-cs-panel-hider'
