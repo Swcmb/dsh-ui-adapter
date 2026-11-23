@@ -234,6 +234,23 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
   方式并入本仓库（`agent/fuse-kit-into-root` 分支），随后平铺到根目录；原始提交历史保留。
 - 该插件本身从 `dsh-claude-style` 的 `sessionPanel` 功能剥离并裁剪，仅依赖原生 DSH。
 
+## cs-panel-hider（dsh-claude-style 详情栏隐藏器）
+
+`cs-panel-hider` 已平铺进本仓库，作为融合套件第三个模块，与 adapter、session-panel
+一起由统一入口 `lib/client.js` / `lib/index.js` 加载。
+
+- **作用**：用 CSS 隐藏 `dsh-claude-style` 自带的会话详情栏
+  `.dsh-claude-details-root` 与头部开关 `.dsh-claude-session-panel-button`，并清理
+  `body[data-dsh-claude-session-panel]` 布局标记；不删除节点、不碰 `dsh-claude-style`
+  的状态。
+- **client 半**：`lib/client-cs-panel-hider.js`（`inject: []`，无额外依赖）。
+- **host 半**：`lib/host-cs-panel-hider.mjs`，只提供诊断落盘路由
+  `POST /__dsh-cs-panel-hider/diag` → 仓库根 `.diag.log`；诊断 stage 有
+  `style-installed`、`hide-probe`、`hide-probe-failed`。
+- **与 session-panel 协作**：session-panel 提供本套件自己的右侧会话详情栏，
+  cs-panel-hider 只隐藏 `dsh-claude-style` 的旧详情栏，两者操作不同节点，互不冲突。
+  统一 Cordis 插件名仍是 `dsh-ui-adapter`，`cordis.patch.yml` 不新增 insert 行。
+
 ### 许可
 
 - 融合套件整体：**GPL-3.0-or-later**（见 `COPYING`、`LICENSE-session-panel`）。

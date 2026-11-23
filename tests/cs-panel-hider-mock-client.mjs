@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 
-const code = fs.readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+// 平铺后的独立 client 半源码；融合入口的统一 client.js 由 tests/client.test.mjs 覆盖。
+const code = fs.readFileSync(new URL('../lib/client-cs-panel-hider.js', import.meta.url), 'utf8');
 let loaded = null;
 const appended = [];
 const removedAttrs = new Set();
@@ -25,6 +26,8 @@ const sandbox = {
   },
   MutationObserver: class { observe() {} disconnect() {} },
   requestAnimationFrame: fn => fn(),
+  setInterval: () => 1,
+  clearInterval: () => {},
   setTimeout: fn => fn(),
   console, Date, Math, JSON, String, Array, Object, Promise, Error,
 };

@@ -26,6 +26,7 @@
     "./client": "./lib/client.js",
     "./client-adapter": "./lib/client-adapter.js",
     "./client-session-panel": "./lib/client-session-panel.js",
+    "./client-cs-panel-hider": "./lib/client-cs-panel-hider.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -35,7 +36,8 @@
     "COPYING",
     "README.md",
     "NOTICES.md",
-    "LICENSE-session-panel"
+    "LICENSE-session-panel",
+    "LICENSE-cs-panel-hider"
   ],
   "scripts": {
     "test": "node --test tests/*.test.mjs"
