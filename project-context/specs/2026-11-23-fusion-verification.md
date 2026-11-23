@@ -757,3 +757,66 @@ function runReplace() {
 本次为 Task 3 与 Task 4 各派出一次 reviewer 子代理，**两次都在运行中长时间无产出并最终
 未返回报告**（Task 1 也出现过同样情况）。因此本节的审查结论由主代理独立完成，
 不声称"通过了子代理审查"。已发出的两次派出请求与其后的两次催促都留在会话记录中。
+
+## 10. 收尾清理与文档补全（2026-11-23 14:0x）
+
+### 10.1 清理 git 元数据残留
+
+融合后 `.git/modules/dsh-session-panel-kit/`、`remote.kit`、
+`refs/remotes/kit/main` 都已失去意义（kit 内容与历史均已进入主对象库）。清理前先逐项
+证明无内容损失，再动：
+
+| 步骤 | 验证依据 |
+|---|---|
+| 确认 kit 历史可达 | `9faa382`/`04a681c`/`dcdae82`/`ab3eda2`/`c41ddf3` 均 `merge-base --is-ancestor HEAD` 成功 |
+| 确认 kit 旧 tip 可达 | `2666b1e`（`fix: anchor the context meter…`）亦是 HEAD 祖先 |
+| 确认对象在主库 | `git cat-file -e` 四个 kit 提交均成功 |
+| 删除 `remote.kit` | `git config --remove-section remote.kit`；之后 `git remote -v` 仅剩 `origin` |
+| 删除 kit ref | `git update-ref -d refs/remotes/kit/main` |
+| 删除元数据目录 | 先改名 `.git/modules/dsh-session-panel-kit.TOREMOVE-20261123`，跑 `git fsck` + 测试 + status 确认无异常后再 `rm -rf` |
+
+`git fsck` 仅剩 4 个 dangling commit/blob，经查为旧 stash/WIP 残留
+（`7c79798` / `7b7e003`，均为 `lib/client.js` 的 WIP），与 kit 无关，不动。
+
+清理后：`git remote -v` 只有 `origin`；`git for-each-ref refs/remotes` 只有 origin 三条；
+`.git/modules/` 为空目录；HEAD `6daf7e7`；测试 72/72；未跟踪 24。
+
+### 10.2 仍未清除的一项（Minor，如实保留）
+
+`dsh-session-panel-kit/` 空目录无法删除。目录内**确实为空**（`find` 无输出、
+`Get-ChildItem -Force` 计数 0），git 视角也完全移除（`git ls-files` 计数 0、索引无
+`160000` gitlink、无 `.gitmodules`）。删除失败的客观原因：进程 **PID 3716（Typora）**
+仍持有该目录句柄，而环境的 safe-delete 钩子在 `genie-trash` 失败时**拒绝**回退到直接删除
+（`SAFE_DELETE_FAIL_CLOSED`）。主代理不去终止用户的编辑器进程，故保留此空目录。
+关闭 Typora 后 `rmdir dsh-session-panel-kit` 即可，无副作用。
+
+### 10.3 补全根 README（审查项 IMPORTANT-8 的处理）
+
+§9 记录的缺口——旧 kit README 的 tab kind 全表与探测脚本用法未迁移——已处理，提交
+`36767fb`。补入内容与两处纠正：
+
+- **session-panel 章**：注册的 kind `dsh-session-details`；五个区块及各自读取的 DSH 投影；
+  2.5 秒轮询 `/__dsh-session-panel?id=`；两个入口（头部 utilities slot / 降级悬浮按钮）；
+  相对上游的取舍（只做截图里的五个区块、token 字符类别算法、去掉 settings/i18n/骨架屏、
+  会话 id 取自 `data-conversation-session`）。
+- **cs-panel-hider 章**：三个隐藏目标及其选择器；"为什么用 CSS 而不是 `remove()`"
+  （节点属于 dsh-claude-style 的 React 树，删了会被重建还可能让 React 报错）。
+- **default-sidebar-tab 章**：完整 tab kind 表、localStorage 自证流程
+  `loaded → apply → attached → probe → replaced`、布局记录 `dsh.sidebar-right.v1.<id>` 的
+  样例形状、`page-probe.mjs` / `cdp-probe.mjs` 用法，以及明确的"不做什么"清单。
+- **历史章**：从只写 session-panel 扩为三个来源仓库齐全。
+
+**两处对旧文本的纠正**（不照抄旧文档）：
+
+1. 旧 kind 表共 9 项且缺 `dsh-session-details`、默认写 `session-inspector-log`——那是
+   融合前的独立包时代。新表按 `lib/config.mjs` 的 `KNOWN_KINDS`（10 项）重排，
+   `dsh-session-details` 置顶并标为默认。已与代码逐项核对。
+2. 旧 README 只说 `page-probe.mjs` 需要 `--remote-debugging-port=9333`，**从未写明
+   `cdp-probe.mjs` 的端口来源**。新文档补上：默认 `9230`，可用 `DSH_CDP_PORT` 覆盖
+   （读自 `scripts/cdp-probe.mjs` 第 8 行）。
+
+同时修正 README「开发」段的测试计数 27 → 72。
+
+补全后校验：README 内所有 `lib/*`、`scripts/*`、`LICENSE-*`、`COPYING`、`NOTICES.md`、
+`docs/notes.md` 引用**逐个验在**（唯一未命中的 `lib/ops-aliases.js` 属于已迁出的外部包
+`dsh-opencode-compat`，文中已注明，非本仓库缺失）；测试 72/72；verify 7/7。
