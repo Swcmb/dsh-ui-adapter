@@ -485,6 +485,15 @@ Task 3 报告与 §6.5 初版共有三处不成立的论断，均在 Task 4 独�
 | R2 | 「出现 3 次」被当作融合生效的佐证 | 3 组 = 3 次 `verify.mjs` 运行 × 每次 2 组；`verify.mjs` 的 check 4 与 check 5 各自 import `lib/index.js` 并调 `apply` 一次。这是测试副作用，不是 DSH boot 证据。 | `scripts/verify.mjs:82,99` |
 | R3 | 「历史 `state-probe.guideReplacedCount:3` 亦显示替换此前已生效」 | 该字段 = `mine.filter((s) => !s.guidePresent).length`，只表示「有 details 的会话当前没有 guide」，无法区分是本插件替换的、用户关掉的、还是从未播种。 | `lib/client-session-panel.js:595` |
 
+**对 R3 的再收窄（复核后）**：R3 撤回的是「该字段**单独**即可证明替换」这一用法，而不是
+说它与替换无关。事实是：3 个 `detailsPresent` 的会话全部 `detailsActive:true` 且
+`guidePresent:false`（`state-probe.sessions[]` 逐条可查），同时全日志 17 条 `probe` 的
+`mineGuides` 恒为空。这两点合起来说明**在那之前确实发生过「guide → details」的状态转移**
+（否则无法解释 details 会占着 tab 且 guide 不在），所以它是**间接证据**、值得记录。
+它仍然不能替代 direct evidence：无法归因到本插件（也可能是历史手动操作），也不能给出时间。
+因此本节结论不变——`replaced` 这个 **direct** stage 在现存任何日志中都是 0 次，
+「替换动作」本身仍属未实机验证，但不应被描述成「完全没有发生过替换的迹象」。
+
 **结论的性质**：default-sidebar-tab 的 client 半在 PID 46980 这一轮**确实执行了**
 （`loaded`→`apply`→`attached` 的 payload 含 `defaultTab` 且 `hasGet` 区分于 session-panel），
 host 半**确实被调用**（payload 与 `resolveConfig()` 默认值一致）。**未被实机证明**的是
