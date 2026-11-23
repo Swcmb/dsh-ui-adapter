@@ -58,7 +58,10 @@ test('package.json：融合根包导出 client-default-sidebar-tab / config，in
   assert.equal(pkg.license, 'GPL-3.0-or-later');
   assert.equal(pkg.exports['./client-default-sidebar-tab'], './lib/client-default-sidebar-tab.js');
   assert.equal(pkg.exports['./config'], './lib/config.mjs');
-  assert.ok(pkg.files.includes('LICENSE-default-sidebar-tab'));
+  // 许可统一为单一 COPYING（GPL-3.0 全文）：融合前三个子包各带一份 md5 相同的副本，
+  // 合并后只保留父仓库原有的 COPYING，不再发布多余副本。
+  assert.ok(pkg.files.includes('COPYING'));
+  assert.ok(!pkg.files.some((f) => f.startsWith('LICENSE')), 'no per-package LICENSE copies should ship');
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml');
   for (const id of ['@deepseek-ai/dsh-client-ui-sidebar-right', '@deepseek-ai/dsh-client-modules']) {
     assert.ok(pkg.dsh.client.inject.includes(id), `missing inject ${id}`);

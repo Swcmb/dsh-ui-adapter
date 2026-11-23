@@ -312,11 +312,12 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 
 ### 许可
 
-- 融合套件整体：**GPL-3.0-or-later**（见 `COPYING`、`LICENSE-session-panel`、
-  `LICENSE-cs-panel-hider`、`LICENSE-default-sidebar-tab`）。
-- 三个迁入模块各自保留原 `LICENSE-*` 全文；`cs-panel-hider` 与 `default-sidebar-tab`
-  均未复制第三方代码，前者只引用 dsh-claude-style 的 DOM class 作为隐藏目标，后者只调用
-  原生 DSH 公开的 `ctx.sidebarRight` 导航 API。
+- 融合套件整体：**GPL-3.0-or-later**，全文见单一 [`COPYING`](COPYING)。融合前三个子包
+  各带一份 `LICENSE`，经核对三份与 `COPYING` 的 md5 完全相同（同一份 GPL-3.0 原文），
+  故合并为一份，不再在仓库里保留重复副本。
+- `cs-panel-hider` 与 `default-sidebar-tab` 均未复制第三方代码，前者只引用
+  dsh-claude-style 的 DOM class 作为隐藏目标，后者只调用原生 DSH 公开的
+  `ctx.sidebarRight` 导航 API。
 - `lib/tokens.mjs` 与详情栏中的 token 计价算法、中文文案移植自
   `dsh-claude-style`（MIT, © 2026 Nwflower），声明见 `NOTICES.md`；MIT 与 GPLv3 兼容，
   汇入时保留原始 MIT 授权全文。
