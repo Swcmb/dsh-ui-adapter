@@ -35,5 +35,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-本插件自身代码采用 GPL-3.0-or-later（见 `LICENSE`）。MIT 与 GPLv3 兼容，
+本插件自身代码采用 GPL-3.0-or-later（见 `COPYING`）。MIT 与 GPLv3 兼容，
 汇入时保留上述 MIT 声明。
+
+## 参考资料（不参与构建）
+
+- **DeepSeek Harness** — <https://github.com/deepseek-ai/deepseek-harness>
+  - 授权：MIT License（`@deepseek-ai/dsh` 声明 `"license": "MIT"`）
+  - 位置：`docs/dsh-internals/`（`source/` 源码、`bundles/` 打包产物、`tools/` 抽取脚本）
+  - 抽取自：本机 DSH `0.2.2-rc.5` 的 `resources/app.asar`
+  - 用途：本插件的 `default-sidebar-tab` 模块直接调用 DSH 未公开文档的
+    `ctx.sidebarRight` / `sidebarRightTabs` 内部接口，这些材料用于核对真实签名。
+  - **本目录内容仍为 MIT 授权，不受本仓库 GPL-3.0-or-later 覆盖**；不进入 `files[]`，
+    不随 npm 包发布。详见 [docs/dsh-internals/README.md](docs/dsh-internals/README.md)。
