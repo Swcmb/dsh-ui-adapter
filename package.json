@@ -27,6 +27,8 @@
     "./client-adapter": "./lib/client-adapter.js",
     "./client-session-panel": "./lib/client-session-panel.js",
     "./client-cs-panel-hider": "./lib/client-cs-panel-hider.js",
+    "./client-default-sidebar-tab": "./lib/client-default-sidebar-tab.js",
+    "./config": "./lib/config.mjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -37,7 +39,8 @@
     "README.md",
     "NOTICES.md",
     "LICENSE-session-panel",
-    "LICENSE-cs-panel-hider"
+    "LICENSE-cs-panel-hider",
+    "LICENSE-default-sidebar-tab"
   ],
   "scripts": {
     "test": "node --test tests/*.test.mjs"

@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const source = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
+const source = readFileSync(join(root, 'lib', 'client-default-sidebar-tab.js'), 'utf8');
 
 /**
  * 在隔离的 fake window 中加载 client.js，返回它的 module.exports 与诊断快照。
@@ -19,6 +19,7 @@ const source = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
 function loadClient(options = {}) {
   const store = new Map();
   const setTimeoutCalls = [];
+  let intervalId = 0;
   let exported = null;
 
   const window = {
@@ -43,6 +44,9 @@ function loadClient(options = {}) {
       return setTimeoutCalls.length;
     },
     clearTimeout: () => {},
+    // 客户端用 setInterval 做只读 runtime-probe / replace 轮询；测试中不真正触发。
+    setInterval: () => ++intervalId,
+    clearInterval: () => {},
     JSON,
     Object,
     Array,

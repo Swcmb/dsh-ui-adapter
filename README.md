@@ -202,13 +202,15 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 ## 会话面板套件（session-panel suite）
 
 自 2026-11-23 起，本包从单一「上下文/账本」适配器扩展为**融合插件套件**。
-`dsh-session-panel-kit` 的 `session-panel` 插件已平铺进本仓库，作为套件的第二个模块，
-与 adapter 一起由统一入口加载。
+`dsh-session-panel-kit` 的 `session-panel`、`cs-panel-hider`、`default-sidebar-tab`
+插件均已平铺进本仓库，与 adapter 一起由统一入口加载（共四个模块）。
 
 | 模块 | client 半 | host 半 | 侧栏 kind | 说明 |
 |---|---|---|---|---|
 | adapter（原有） | `lib/client.js` → `lib/client-adapter.js` | `lib/index.js` → `lib/host-adapter.mjs` | — | 广告位 / 账本切换卡 / tokenUsage 垫片 |
 | session-panel | `lib/client-session-panel.js` | `lib/host-session-panel.mjs` | `dsh-session-details` | 右侧会话详情栏：环境 / 上下文 / 会话统计 / Token 用量 / 子智能体 |
+| cs-panel-hider | `lib/client-cs-panel-hider.js` | `lib/host-cs-panel-hider.mjs` | — | 隐藏 dsh-claude-style 自带详情栏 |
+| default-sidebar-tab | `lib/client-default-sidebar-tab.js` | `lib/host-default-sidebar-tab.mjs` | — | 把原生播种的 guide 页原位替换为指定 tab（默认会话详情） |
 
 统一入口：
 
@@ -220,7 +222,7 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 ### 协作契约
 
 - **单一 Cordis 插件名**：`cordis.patch.yml` 只保留一条 insert
-  （`id: dsh-ui-adapter` / `name: '@ianwusb/dsh-ui-adapter'`）；三个 client 模块由统一
+  （`id: dsh-ui-adapter` / `name: '@ianwusb/dsh-ui-adapter'`）；四个 client 模块由统一
   client 入口加载，host 不再分别注册第二个插件。
 - **配置注入并按并集声明**：`dsh.client.inject` 取各模块并集
   （`runtime`、`ui-layout`、`locale`、`ui-sidebar-right`、`modules`），确保详情栏挂载到
@@ -253,7 +255,30 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 
 ### 许可
 
-- 融合套件整体：**GPL-3.0-or-later**（见 `COPYING`、`LICENSE-session-panel`）。
+- 融合套件整体：**GPL-3.0-or-later**（见 `COPYING`、`LICENSE-session-panel`、
+  `LICENSE-cs-panel-hider`、`LICENSE-default-sidebar-tab`）。
 - `lib/tokens.mjs` 与详情栏中的 token 计价算法、中文文案移植自
   `dsh-claude-style`（MIT, © 2026 Nwflower），声明见 `NOTICES.md`；MIT 与 GPLv3 兼容，
   汇入时保留原始 MIT 授权全文。
+
+## default-sidebar-tab（默认右侧栏 tab）
+
+`default-sidebar-tab` 已平铺进本仓库，作为融合套件第四个模块，与 adapter、
+session-panel、cs-panel-hider 一起由统一入口 `lib/client.js` / `lib/index.js` 加载。
+
+- **作用**：当用户打开一个会话、原生右侧栏播种出开始页（`guide`）时，用配置的 tab
+  通过 `sidebarRight.openTab(kind, { replaceTab: guide.tabId })` **原位替换**它，
+  默认目标是会话详情 `dsh-session-details`。每个会话只替换一次；不改写侧栏持久化布局。
+- **client 半**：`lib/client-default-sidebar-tab.js`（`inject: ['slots']`，apply 内动态
+  等待原生 `sidebarRight`）。自证诊断写本地键 `dsh-default-sidebar-tab:diag`，并经
+  `/__dsh-session-panel/diag` 上报宿主落盘；stage 含 `loaded`、`attached`、`replaced`、
+  `runtime-probe` 等。
+- **host 半**：`lib/host-default-sidebar-tab.mjs` 监听 `webserver/index-inject`，把配置
+  作为全局变量注入每个 index 页面。
+- **配置项**（cordis 配置段）：
+  - `defaultTab`：非空字符串，目标 tab 的 kind；默认 `dsh-session-details`。
+  - `enabled`：布尔，默认 `true`；设为 `false` 时完全不替换。
+- **全局注入**：`__DSH_DEFAULT_SIDEBAR_TAB__`，值为 `{ defaultTab, enabled }`。
+- **与 session-panel 的契约**：`default-sidebar-tab` 的 `DEFAULT_TAB` 与 session-panel
+  注册的 `TAB_KIND` 必须同为 `dsh-session-details`，否则替换后的 tab 无法解析。
+  两者由统一 client 入口组合，无需各自注册独立 Cordis 插件。

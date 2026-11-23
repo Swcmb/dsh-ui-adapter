@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const client = readFileSync(join(root, 'lib', 'client.js'), 'utf8');
-const host = readFileSync(join(root, 'lib', 'index.mjs'), 'utf8');
+const client = readFileSync(join(root, 'lib', 'client-default-sidebar-tab.js'), 'utf8');
+const host = readFileSync(join(root, 'lib', 'host-default-sidebar-tab.mjs'), 'utf8');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 test('client 走原生 ModuleLoader，ctx.inject 动态等待 sidebarRight', () => {
@@ -25,11 +25,13 @@ test('client 只用原生 API：mounted / openTabs / openTab', () => {
   assert.ok(client.includes('sidebar.openTab('));
 });
 
-test('client 不碰 sidebar 布局存储、不依赖第三方插件', () => {
-  // 允许写本插件自己的诊断键 dsh-default-sidebar-tab:diag（用于非截图验证），
-  // 但绝不允许读写原生的 dsh.sidebar-right.* 布局存储。
-  assert.ok(!client.includes('dsh.sidebar-right'), 'client must not touch native sidebar layout storage');
-  for (const name of ['dsh-claude-style', 'dsh-context', 'better-sidebar', 'dsh-fish', 'session-panel']) {
+test('client 不改写 sidebar 布局存储、不依赖第三方插件', () => {
+  // 允许：写自己的诊断键 dsh-default-sidebar-tab:diag；经 /__dsh-session-panel/diag 上报；
+  // 只读 getItem('dsh.sidebar-right.v1.' + sessionId) 做 runtime-probe 自证。
+  // 禁止：setItem 改写原生布局存储；引用第三方插件实现。
+  assert.ok(!/localStorage\.setItem\([^)]*sidebar-right/.test(client), 'client must not write native sidebar layout storage');
+  assert.ok(client.includes("localStorage.getItem(key)"), 'read-only layout probe expected');
+  for (const name of ['dsh-claude-style', 'dsh-context', 'better-sidebar', 'dsh-fish']) {
     assert.ok(!client.includes(name), `client must not reference ${name}`);
   }
 });
@@ -52,13 +54,13 @@ test('host 用 webserver/index-inject 注入配置，不碰 index 文件', () =>
   assert.ok(!host.includes('writeFileSync'));
 });
 
-test('package.json：私有独立包，client inject 声明原生 sidebar-right 与 modules', () => {
-  assert.equal(pkg.private, true);
+test('package.json：融合根包导出 client-default-sidebar-tab / config，inject 覆盖原生服务', () => {
   assert.equal(pkg.license, 'GPL-3.0-or-later');
-  assert.deepEqual(pkg.dsh.client.inject, [
-    '@deepseek-ai/dsh-client-ui-sidebar-right',
-    '@deepseek-ai/dsh-client-modules',
-  ]);
+  assert.equal(pkg.exports['./client-default-sidebar-tab'], './lib/client-default-sidebar-tab.js');
+  assert.equal(pkg.exports['./config'], './lib/config.mjs');
+  assert.ok(pkg.files.includes('LICENSE-default-sidebar-tab'));
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml');
-  assert.equal(pkg.dsh.manifestVersion, 1);
+  for (const id of ['@deepseek-ai/dsh-client-ui-sidebar-right', '@deepseek-ai/dsh-client-modules']) {
+    assert.ok(pkg.dsh.client.inject.includes(id), `missing inject ${id}`);
+  }
 });

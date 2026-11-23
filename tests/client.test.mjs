@@ -7,9 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// lib/client.js is the unified classic-script bundle: adapter, session-panel
-// and cs-panel-hider IIFEs are inlined here; the bundle registers ONE module
-// and composes the inlined descriptors inside its factory.
+// lib/client.js is the unified classic-script bundle: adapter, session-panel,
+// cs-panel-hider and default-sidebar-tab IIFEs are inlined here; the bundle
+// registers ONE module and composes the inlined descriptors inside its factory.
 const source = fs.readFileSync(path.join(here, '..', 'lib', 'client.js'), 'utf8');
 
 const LEDGER = {
@@ -216,12 +216,13 @@ test('client bundle loads and declares only slots + locale', () => {
   assert.deepEqual(Array.from(exports.inject), ['slots', 'locale']);
 });
 
-test('unified script composes adapter, session-panel and cs-panel-hider modules', () => {
+test('unified script composes adapter, session-panel, cs-panel-hider and default-sidebar-tab modules', () => {
   const { sandbox } = loadBridge();
   assert.deepEqual(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__), [
     '@ianwusb/dsh-ui-adapter',
     '@local/dsh-session-panel',
     '@local/dsh-cs-panel-hider',
+    '@local/dsh-default-sidebar-tab',
   ]);
 });
 
@@ -233,7 +234,7 @@ test('fused bundle installs cs-panel-hider CSS for dsh-claude-style', () => {
   assert.ok(style, 'cs-panel-hider style must be injected');
   assert.match(style.textContent, /\.dsh-claude-details-root\{display:none!important/);
   assert.match(style.textContent, /\.dsh-claude-session-panel-button\{display:none!important/);
-  assert.equal(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__).at(-1), '@local/dsh-cs-panel-hider');
+  assert.equal(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__).at(-1), '@local/dsh-default-sidebar-tab');
 });
 
 test('registers NO conversation.view tab and no sidebar tab', () => {
