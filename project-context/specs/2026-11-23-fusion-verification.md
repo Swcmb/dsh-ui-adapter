@@ -597,3 +597,112 @@ function runReplace() {
 本地行为测试。**不以 `guideReplacedCount` 之类的间接字段替代**（原因见 §6.5-R 的 R3）。
 最终验证会从空日志重试；若仍无法构造出「已挂载会话 + guide tab + 右栏展开 + 渲染器可见」
 的条件，将如实记录为**未实机验证**，而不是写成通过。
+## 8. 最终验证（合并到 main 之后，全新日志、单次 boot）
+
+合并 commit `7fb7e6c`（父：`f0ba5ef` 旧 main + `24134e6` 分支头）。本节是用户要求的
+「全部做完之后再本机重新安装并实机验证所有功能」的最终一次。
+
+### 8.1 为什么这一节必须用全新日志
+
+`.host.log` 曾累积到 2884 行、跨十余轮 boot，且 `[dsh-default-sidebar-tab]` 的日志行
+不带时间戳与 pid（`lib/host-default-sidebar-tab.mjs:14-20`）。Task 1 与 Task 3 都因此出过
+错误归因。所以本次流程是：
+
+1. 停掉 DSH（`CloseMainWindow` → 8s → 仍残留则 `Stop-Process -Force` → 4s，确认全停）；
+2. 归档并把 `.host.log` / `.diag.log` 清空为 0 字节，等 2s 复核仍为 0（证明没有进程在写）；
+3. 清空 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` 后启动；
+4. **不再运行 `verify.mjs`**——它的 check 4/5 会各自 `import` 并 `apply` 一次 host，
+   往 `.host.log` 写两组 tab 行，污染判断。verify 已在启动**之前**单独跑过。
+
+### 8.2 环境
+
+- 启动时间 13:52:35；进程 `12000, 56772, 57576, 60328, 65928`；host pid **65928**。
+- Web `127.0.0.1:64814`，inspector CDP `127.0.0.1:9230`，局域网 `172.27.16.1:57098`。
+- 启动输出无 error 级行（只含 update 检查、wechat、agentero、wsl-tool、inspector、web 地址）。
+
+### 8.3 安装与静态检查（启动前）
+
+| 项 | 结果 |
+|---|---|
+| `install.mjs --dry-run` | `already registered, nothing to do`（未执行 `--undo`） |
+| `node --test tests/*.test.mjs` | **68 pass / 0 fail** |
+| `node scripts/verify.mjs` | **7/7 checks passed** |
+| `git submodule status` / `.gitmodules` | 空 / 不存在 |
+| `cs-panel-hider/`、`default-sidebar-tab/`、`session-panel/` | 三个子目录均不存在 |
+| `git ls-files dsh-session-panel-kit` | 0 |
+| `lib/client-*.js` / `lib/host-*.mjs` | 4 / 4 |
+| 24 个用户未跟踪根文件 | 数量与名单与基线逐一相同，未改动 |
+
+### 8.4 host 半（`.host.log`，单次 boot，全部带 pid=65928）
+
+```
+05:52:41.804Z apply:enter  {"where":"ctx",...,"webServerViaGet":"present",...}
+05:52:41.805Z bind:index-inject
+05:52:41.806Z bind:routes-ok {"origin":"http://127.0.0.1:18787"}
+05:52:41.806Z bind:effect-owned
+05:52:41.807Z apply:exit
+[dsh-default-sidebar-tab] apply:enter {"defaultTab":"dsh-session-details","enabled":true}
+[dsh-default-sidebar-tab] bind:index-inject {"name":"__DSH_DEFAULT_SIDEBAR_TAB__"}
+```
+
+统一入口 `apply:enter → bind:index-inject → bind:routes-ok → bind:effect-owned → apply:exit`
+完整；default-sidebar-tab 的 host 半被调用且拿到解析后的配置。
+
+**关键：本次 `[dsh-default-sidebar-tab]` 行只有 1 对**，而 Task 3 报告里有 3 对。
+这直接印证了 §6.5-R 的 R2——那些多出来的对数是 `verify.mjs` 的副作用，不是真实 boot。
+
+### 8.5 client 半（`.diag.log`，同一 boot 内 12 类 stage）
+
+| 模块 | stage（首次出现时刻） | 判定依据 |
+|---|---|---|
+| adapter | `client:diag` → `.host.log` `05:54:11.117Z {"match":"exact","shim":"active","sessionCount":156,"usage":true}` | 账本垫片已接管（此前为 `fallback`/`shim:none`） |
+| session-panel | `loaded` 05:52:59.004 · `apply{"hasSlots":true,"hasInject":true}` 05:53:01.004 · `registered{"tabId":"@local/dsh-session-panel","kind":"dsh-session-details","disposers":3}` 05:53:01.235 · `guide-entries{"total":5,"mineCount":1}` · `sidebar-right-injected{"hasToggle":true}` · `header-toggle-registered` 05:53:01.048 · `state-probe` ×10 | tab 类型已注册、guide 入口被采纳、头部开关与本会话详情栏已注入 |
+| cs-panel-hider | `style-installed{"styleId":"dsh-cs-panel-hider-style"}` 05:53:01.099 · `hide-probe` ×2：`styleInstalled:true, styleHasRule:true, panel{display:"none",visibility:"hidden",hidden:true}` | CSS 已装且规则命中真实节点（由页面自身读取 computed style 得出） |
+| default-sidebar-tab | `apply{"hasInject":true,"hasGet":true,"hasEffect":true}` 05:53:01.120 · `attached{"defaultTab":"dsh-session-details","enabled":true}` 05:53:01.429 · `rightbar-width-set{"width":300}` 05:53:01.202 · `probe` ×2 | `hasGet` 这个 payload 是与 session-panel 的 `hasSlots` 区分开的硬判据 |
+
+同源路由（HTTP 实测，端口 64814）：
+
+| 路由 | 结果 |
+|---|---|
+| `GET /__ctx-bili/status` | 200，`{"origin":"http://127.0.0.1:18787","pid":19864,"live":true}` |
+| `GET /__ctx-bili/sessions` | 200，98678 bytes，156 个会话 |
+| `POST /__ctx-bili/diag` | 204 |
+| `POST /__dsh-session-panel/diag` | 200 |
+| `POST /__dsh-cs-panel-hider/diag` | 200 |
+
+### 8.6 仍未实机验证的一项（如实记录）
+
+**「guide → 会话详情」的替换动作本身。**
+
+本次 boot 的两条 `probe` 事件：
+
+```
+05:53:01.431Z mineGuides=[]  allGuides=1  guideTabs=[{tabId:"tab2", sessionId:"session-32fecaee-..."}]
+05:53:03.144Z mineGuides=[]  allGuides=1  mounted="session-723f62c7-..."  (同上)
+```
+
+即：屏幕上挂载的会话是 `723f...`，而唯一存在的 guide tab 属于**未挂载**的 `32fecaee...`。
+`runReplace()` 只精确匹配当前挂载会话（`lib/client-default-sidebar-tab.js:139`），
+所以它在 `guides.length === 0` 处返回，`replaced` 不出现。这与 Task 3 观察到的情形一致，
+在本次单 boot 中仍无法构造出触发条件。
+
+因此：
+
+- **不**声称替换已在实机验证通过；
+- **不**用 `guideReplacedCount`、`targetOpen` 之类的间接字段替代直接证据
+  （§6.5-R 的 R3 说明了它能说明什么、不能说明什么）；
+- 替换路径的支撑目前只有本地行为测试 12/12（含 3 条专为两个守卫分支新增的用例）。
+
+### 8.7 结论
+
+| 项 | 状态 |
+|---|---|
+| 四个插件融合为单一包 `@ianwusb/dsh-ui-adapter` | ✅ 已验证 |
+| 无 `cs-panel-hider/`、`default-sidebar-tab/`、`session-panel/`、`dsh-session-panel-kit/` 子目录 | ✅ 已验证 |
+| kit 提交历史保留（经 subtree merge 成为 main 祖先） | ✅ 已验证（`9faa382` 等可达） |
+| 单次 boot 内四插件 host + client 半均执行 | ✅ 已验证（各自专属 stage） |
+| 同源路由全部可用 | ✅ 已验证（200/204） |
+| 68/68 测试、verify 7/7 | ✅ 已验证 |
+| guide→详情 替换动作 | ⚠️ **未实机验证**（触发条件未出现；仅本地测试覆盖） |
+| 空目录 `dsh-session-panel-kit/` | ⚠️ 被 Typora pid 3716 占用，未能删除；git 已不跟踪任何 kit 文件 |
+| `--compose`（需 `dsh` CLI） | — 本机无 CLI，未运行 |
