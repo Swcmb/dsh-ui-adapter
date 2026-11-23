@@ -15,6 +15,8 @@ const source = readFileSync(join(root, 'lib', 'client-default-sidebar-tab.js'), 
 /**
  * 在隔离的 fake window 中加载 client.js，返回它的 module.exports 与诊断快照。
  * @param {object} options.injected 注入到 window 的配置全局
+ * @param {string} options.visibilityState 提供 document 时其 visibilityState
+ *   （省略则不定义 document，模拟 client 运行在无 DOM 的宿主里）
  */
 function loadClient(options = {}) {
   const store = new Map();
@@ -56,6 +58,10 @@ function loadClient(options = {}) {
     Date,
     console,
   };
+  // client 用 `typeof document !== 'undefined'` 判定离屏渲染器；只有显式要求时才提供。
+  if (options.visibilityState !== undefined) {
+    sandbox.document = { visibilityState: options.visibilityState };
+  }
 
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox, { filename: 'client.js' });
@@ -73,6 +79,9 @@ function makeSidebar(initial = {}) {
   const state = {
     mounted: initial.mounted ?? undefined,
     tabs: initial.tabs ?? [],
+    // 原生 sidebarRight.isExpanded()。undefined = 该 API 不存在（走「不检查」路径）；
+    // false = 右栏收起（client 应跳过替换，见 skip-collapsed 分支）。
+    expanded: initial.expanded,
   };
   const listeners = { mounted: new Set(), tabs: new Set() };
   const calls = [];
@@ -104,6 +113,10 @@ function makeSidebar(initial = {}) {
       subscribe: (fn) => { listeners.tabs.add(fn); return () => listeners.tabs.delete(fn); },
     },
   };
+  // 只有显式交出 expanded 时才提供 isExpanded：undefined 表示「原生无此 API」。
+  if (initial.expanded !== undefined) {
+    sidebar.isExpanded = () => state.expanded;
+  }
 
   function emit() {
     for (const fn of listeners.tabs) fn();
@@ -116,6 +129,7 @@ function makeSidebar(initial = {}) {
     state,
     setMounted(v) { state.mounted = v; emit(); },
     setTabs(v) { state.tabs = v; emit(); },
+    setExpanded(v) { state.expanded = v; emit(); },
     emit,
   };
 }
@@ -251,4 +265,66 @@ test('同一 guide 只替换一次，不重复 openTab', () => {
   fake.emit();
   fake.emit();
   assert.equal(fake.calls.length, 1, '重复触发订阅不应再次 openTab');
+});
+
+// ---------------------------------------------------------------------------
+// 回归：runReplace 的两个 skip 分支必须真的可达
+//
+// 早前版本把 `const guide = guides[0]` 写在两个 skip 分支之后，而分支里要读
+// `guide.tabId`。那落在 const 的暂时性死区里，每次命中都会抛
+// `ReferenceError: Cannot access 'guide' before initialization`，被订阅回调吞掉
+// （实机上 skip-collapsed / skip-hidden-renderer 各 0 次，而 apiIsExpanded 全程
+// 为 false，1396 次探针无一命中）。这两条测试锁住分支可达性与不抛错。
+// ---------------------------------------------------------------------------
+
+test('右栏收起时不替换，且记录 skip-collapsed（不抛 ReferenceError）', () => {
+  const { exports, diag, setTimeoutCalls } = loadClient();
+  const fake = makeSidebar({
+    mounted: 'session-a',
+    tabs: [{ tabId: 'tab1', kind: 'guide', sessionId: 'session-a' }],
+    expanded: false,
+  });
+
+  // 若 skip 分支抛错，错误会从 apply 里冒出来（runReplace 在 apply 内同步执行）。
+  exports.apply(makeCtx(fake.sidebar));
+
+  assert.equal(fake.calls.length, 0, '右栏收起时不应 openTab');
+  const stages = diag().events.map((e) => e.stage);
+  assert.ok(stages.includes('skip-collapsed'), `应记录 skip-collapsed，实际: ${stages.join(',')}`);
+  assert.ok(!stages.includes('replaced'), '不应替换');
+  assert.equal(setTimeoutCalls.length, 0, 'skip 不是失败，不应安排重试');
+  const event = diag().events.find((e) => e.stage === 'skip-collapsed');
+  assert.equal(event.tabId, 'tab1', 'skip 事件必须带上 guide 的 tabId');
+  assert.equal(event.sessionId, 'session-a', 'skip 事件必须带上 sessionId');
+});
+
+test('右栏展开时同一会话的 guide 照常替换（对照 skip-collapsed）', () => {
+  const { exports, diag } = loadClient({ injected: { defaultTab: 'session-inspector-log', enabled: true } });
+  const fake = makeSidebar({
+    mounted: 'session-a',
+    tabs: [{ tabId: 'tab1', kind: 'guide', sessionId: 'session-a' }],
+    expanded: true,
+  });
+  exports.apply(makeCtx(fake.sidebar));
+
+  assert.equal(fake.calls.length, 1, '展开状态应替换');
+  assert.equal(fake.calls[0].opts.replaceTab, 'tab1');
+  const stages = diag().events.map((e) => e.stage);
+  assert.ok(stages.includes('replaced'));
+  assert.ok(!stages.includes('skip-collapsed'), '不应误判为收起');
+});
+
+test('离屏渲染器（visibilityState:hidden）不替换，记录 skip-hidden-renderer', () => {
+  const { exports, diag } = loadClient({ visibilityState: 'hidden' });
+  const fake = makeSidebar({
+    mounted: 'session-a',
+    tabs: [{ tabId: 'tab1', kind: 'guide', sessionId: 'session-a' }],
+    expanded: true,
+  });
+  exports.apply(makeCtx(fake.sidebar));
+
+  assert.equal(fake.calls.length, 0, '离屏渲染器不应改动共享布局');
+  const stages = diag().events.map((e) => e.stage);
+  assert.ok(stages.includes('skip-hidden-renderer'), `应记录 skip-hidden-renderer，实际: ${stages.join(',')}`);
+  assert.ok(!stages.includes('replaced'));
 });
