@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // lib/client.js is the unified classic-script bundle: both the adapter and the
-// session-panel IIFEs are inlined here, registered as separate load() descriptors.
+// session-panel IIFEs are inlined here; the bundle registers ONE module and
+// composes the inlined descriptors inside its factory.
 const source = fs.readFileSync(path.join(here, '..', 'lib', 'client.js'), 'utf8');
 
 const LEDGER = {
@@ -154,9 +155,10 @@ function loadBridge({ withAd = true, patchUsage = true } = {}) {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  const adapter = descriptors.find((d) => d.id === '@ianwusb/dsh-ui-adapter');
-  assert.ok(adapter, 'adapter descriptor must be registered by the bundle');
-  const exports = adapter.factory((id) => (id === 'react' ? react : {}));
+  const bundle = descriptors.find((d) => d.id === '@ianwusb/dsh-ui-adapter');
+  assert.ok(bundle, 'the bundle must register exactly one module under its own id');
+  assert.equal(descriptors.length, 1, 'DSH activates one module per bundle; no extra load() ids');
+  const exports = bundle.factory((id) => (id === 'react' ? react : {}));
   return { exports, descriptors, sandbox, react, dom };
 }
 
@@ -214,26 +216,24 @@ test('client bundle loads and declares only slots + locale', () => {
   assert.deepEqual(Array.from(exports.inject), ['slots', 'locale']);
 });
 
-test('unified script registers both adapter and session-panel descriptors', () => {
-  const { descriptors } = loadBridge();
-  assert.ok(
-    descriptors.some((d) => d.id === '@ianwusb/dsh-ui-adapter'),
-    'adapter descriptor must be registered',
-  );
-  assert.ok(
-    descriptors.some((d) => d.id === '@local/dsh-session-panel'),
-    'session-panel descriptor must be registered by the same script',
-  );
+test('unified script composes both adapter and session-panel modules', () => {
+  const { sandbox } = loadBridge();
+  assert.deepEqual(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__), [
+    '@ianwusb/dsh-ui-adapter',
+    '@local/dsh-session-panel',
+  ]);
 });
 
 test('registers NO conversation.view tab and no sidebar tab', () => {
   const { exports } = loadBridge();
   const { ctx, injections, registrations } = makeCtx();
   exports.apply(ctx);
-  assert.deepEqual(injections, ['shell.overlay']);
+  // The fused bundle also carries session-panel's header-toggle slot; it is
+  // neither a conversation.view nor a sidebar.right.pane.tab entry.
+  assert.deepEqual(injections, ['shell.overlay', 'conversation.session.header.utilities']);
   assert.equal(injections.includes('conversation.view'), false);
   assert.equal(injections.includes('sidebar.right.pane.tab'), false);
-  assert.equal(registrations.length, 1);
+  assert.equal(registrations.length, 2);
   assert.equal(registrations[0].options.name, 'shell.overlay');
 });
 

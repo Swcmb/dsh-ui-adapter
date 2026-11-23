@@ -140,12 +140,14 @@ check('client bundle hides the ad and mounts the switch', () => {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  const adapter = descriptors.find((d) => d.id === '@ianwusb/dsh-ui-adapter');
-  if (!adapter) throw new Error('adapter descriptor was not registered by the client bundle');
-  if (!descriptors.some((d) => d.id === '@local/dsh-session-panel')) {
-    throw new Error('session-panel descriptor was not registered by the client bundle');
+  const bundle = descriptors.find((d) => d.id === '@ianwusb/dsh-ui-adapter');
+  if (!bundle) throw new Error('the client bundle did not register its module');
+  if (descriptors.length !== 1) throw new Error(`DSH activates one module per bundle, got ${descriptors.length}`);
+  const exports = bundle.factory((id) => (id === 'react' ? react : {}));
+  const composed = Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__ ?? []);
+  if (!composed.includes('@ianwusb/dsh-ui-adapter') || !composed.includes('@local/dsh-session-panel')) {
+    throw new Error(`unified bundle did not compose both modules (got ${composed.join(', ') || 'none'})`);
   }
-  const exports = adapter.factory((id) => (id === 'react' ? react : {}));
   const regs = [];
   exports.apply({
     slots: { inject: (_n, f) => f(), register: (o, c) => { regs.push({ o, c }); } },

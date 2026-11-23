@@ -163,55 +163,52 @@ attached:1, runtime-probe:56, probe:2
 
 ---
 
-## 4. Task 1 client 修复：classic-script 内联降级（Risk A 已解除）
+## 4. Task 1 client 修复：单模块 classic-script 聚合（Risk A 已解除）
 
-### 4.1 根因与修复
+### 4.1 根因（两层）
 
-设计文档 §4.1 line 113 / §6 line 220 预留的降级路径已被触发：DSH 把 `lib/client.js` 作为 **classic script** 注入渲染进程，原统一入口的静态 `import './client-adapter.js'` / `import './client-session-panel.js'` 不会被执行。`scripts/verify.mjs` 用 `vm.runInContext(source, sandbox)` 执行入口也印证了这一语义。
+1. **第一层**：DSH 把 `lib/client.js` 作为 **classic script** 注入渲染进程，原统一入口的静态 `import` 不会执行（`scripts/verify.mjs` 的 `vm.runInContext` 亦印证）。
+2. **第二层（reviewer 发现）**：即使把两个 IIFE 内联为两次 `window.__ModuleLoader__.load(...)`，DSH 也**不会激活第二个模块**。从 DSH 内置 `app.asar` 的 `createClientModuleSystem` / `parseBootManifest` 可见：boot graph 每个已安装 bundle 只有一个 entry，`ClientModuleSystem` 按 manifest 的 module id 决定激活；同一脚本内额外 `load()` 的 id 只会被登记进 factory 表，不会进入激活集。因此 `@local/dsh-session-panel` 从未执行其 `apply`，先前记录的 `loaded` / `apply` / `attached` / `probe` / `runtime-probe` 其实全部来自**仍独立安装的 default-sidebar-tab**（它复用 `/__dsh-session-panel/diag` 通道），属错误归因。
 
-修复方式：`lib/client.js` 改为 classic script，按 adapter → session-panel 顺序**逐字内联**两个完整 IIFE（1728 行），两个 `window.__ModuleLoader__.load({ id, factory })` 分别注册 `@ianwusb/dsh-ui-adapter` 与 `@local/dsh-session-panel`。`lib/client-adapter.js` / `lib/client-session-panel.js` 原样保留为各模块源码。`tests/client.test.mjs` 与 `scripts/verify.mjs` 改为收集全部 descriptor 并按 id 选取，另加 session-panel descriptor 注册断言；verify 同时接受短名 `dsh-ui-adapter` 与完整包名（不改 `cordis.patch.yml` / `lib/index.js`，二者按 brief 要求保留短名）。
+### 4.2 最终修复形态
 
-### 4.2 本地验证（实跑）
+`lib/client.js` 注册**唯一一个**模块 `id: '@ianwusb/dsh-ui-adapter'`（与 bundle id 一致，必定被激活）。其 factory 内用局部 `const window = { __ModuleLoader__: { load: (d) => descriptors.push(d) } }` 遮蔽全局 `window`，再逐字内联 adapter 与 session-panel 两个 IIFE（源码零改动），于是两个 `load()` 都落到局部收集器，不产生额外模块 id。factory 末尾：
+
+- 依次调用各 descriptor 的 `factory(require)` 完成 materialization；
+- 合并 `inject` 为 `['slots', 'locale']`；
+- 返回统一 `apply(ctx)`，依次调用两个插件的 `apply`；
+- 写入 `globalThis.__DSH_UI_ADAPTER_CLIENT_MODULES__`（仅为测试自证，不影响模块面）。
+
+### 4.3 本地验证（实跑）
 
 ```
-node --test tests/*.test.mjs
-# tests 33 / pass 33 / fail 0
-
+node --test tests/*.test.mjs     -> 33 tests / 33 pass / 0 fail
 node scripts/verify.mjs --profile "D:/ai-configs/runtime/dsh/profiles/desktop"
-# 7/7 checks passed
-#   profile registers the bundle / installed package resolves
-#   cordis.patch.yml declares the host row
-#   host half imports and publishes config
-#   host half registers the same-origin ledger routes
-#   client bundle hides the ad and mounts the switch
-#   billion-context context tab disabled
+                                 -> 7/7 PASS
 ```
+`--compose` 仍受限于本机无 `dsh` CLI（环境限制，非代码缺陷）。
 
-`--compose` 未通过项仍为环境限制：`dsh` CLI 不在本机 PATH，非代码缺陷。
+### 4.4 DSH 干净重启与实机证据
 
-### 4.3 DSH 干净重启与实机证据
+清 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` → `CloseMainWindow()` → 15s → `Stop-Process -Force` → `Start-Process` → 32s。
 
-PowerShell 清 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` → `CloseMainWindow()` → 等 15s → `Stop-Process -Force` 残留 → `Start-Process "D:\ProgramFiles\DSH\DeepSeek Harness.exe"` → 等 30s。
+- 新 PID：`41168, 49556, 54796, 55120, 55940`；Web 端口 `57719`；CDP `9230`。
+- `GET /__ctx-bili/status` → 200；`hits.sessions=4, status=2, diag=1`。
+- `.host.log`（新 PID）：`apply:enter`、`bind:routes-ok`、三条 `/__ctx-bili/*` 的 `route:hit`、`client:diag`。
+- `.diag.log` 中出现**仅 session-panel 会产生**的 stage（已与 default-sidebar-tab 的 stage 集合区分）：
 
-- 新进程树：`33624, 38372, 45704, 55192, 56816`；窗口 `跟大肥鱼说话 — DeepSeek Harness`。
-- 新 Web 端口：`49358`（CDP inspector `9230`）。
-- `GET http://127.0.0.1:49358/__ctx-bili/status` → **HTTP 200**，`{"origin":"http://127.0.0.1:18787","pid":19864,"live":true,"source":"instance-file","hits":{"/__ctx-bili/sessions":3,"/__ctx-bili/status":2,"/__ctx-bili/diag":1}}`。
-- `.host.log`（新 PID 56816）：
-  ```
-  apply:enter {"where":"ctx","inject":"function","on":"function","effect":"function",...}
-  bind:index-inject
-  bind:routes-ok {"origin":"http://127.0.0.1:18787"}
-  route:hit {"route":"/__ctx-bili/sessions","status":200}
-  route:hit {"route":"/__ctx-bili/status","status":200}
-  route:hit {"route":"/__ctx-bili/diag","status":204}
-  client:diag {"via":"runtime-inject","sessions":"ok","sessionCount":154,"usage":false}
-  ```
-- `.diag.log`（修复后新时间戳 `1795404470xxx` 起）出现 session-panel client stage：`loaded`、`apply`、`attached`、`rightbar-width-set`、`probe`，以及持续的 `runtime-probe`。这些事件由融合后的 `@local/dsh-session-panel` IIFE 产生，证明统一 classic-script 入口中的两个模块均被 DSH 实际执行。
+  | stage | 次数 | 说明 |
+  |---|---|---|
+  | `registered` | 2 | `sidebarRightTabs` 注册 `dsh-session-details` 成功 |
+  | `header-toggle-registered` | 2 | 头部开关注册成功 |
+  | `sidebar-right-injected` | 2 | 原生导航控制器注入 |
+  | `guide-entries` | 2 | 入口引导注册 |
+  | `state-probe` | 18 | `withDetails=3, detailsActiveCount=3, guideReplacedCount=3`，`kinds=['dsh-session-details']` |
 
-### 4.4 结论
+  这证明融合后的 session-panel client 已真实执行并注册 tab 类型；此前错误归因已作废。
 
-- adapter client：PASS（`/__ctx-bili/*` 路由命中、`client:diag` 含 154 个会话）。
-- session-panel client：PASS（`loaded` / `apply` / `attached` / `probe` 等 stage 落盘）。
-- 风险 A（静态 import 不执行）：**已解除**。
-- 仍受限：renderer DOM / console 直连（CDP 只能到 host realm）；`sidebarRightTabs` 注册表只能由上述 diag stage 间接证明。此处如实记录限制，不推断未观察到的结果。
-- 环境限制：`dsh` CLI 不在 PATH，故 `--compose` 无法执行。
+### 4.5 结论与限制
+
+- adapter client：PASS；session-panel client：PASS；风险 A：**已解除**。
+- renderer DOM/console 仍无法直连（CDP 只能到 host realm）；`sidebarRightTabs` 由上述 session-panel 专属 stage 与 `state-probe` 快照证明，不再依赖错误归因。
+- `--compose` 因 `dsh` CLI 缺失未执行。

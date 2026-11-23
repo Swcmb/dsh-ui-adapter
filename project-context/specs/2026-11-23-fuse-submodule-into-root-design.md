@@ -89,18 +89,19 @@ D:\dsh-ui-adapter\
 
 ## 4. 融合机制
 
-### 4.1 client 半（统一入口 + 四个独立模块）
+### 4.1 client 半（单模块 classic-script 聚合）
 
-`lib/client.js` 只做聚合，四条静态 import 触发四个 IIFE 各自注册自己的模块 id：
+> 实测修正（2026-11-23，Task 1 验证）：原设计优先静态 import、失败则内联四个 IIFE 各自注册 id。实机验证证明两条路都不足：DSH 把 `lib/client.js` 作为 classic script 注入（静态 import 不执行）；且 boot manifest **每个 bundle 只激活一个 module id**（见 `app.asar` 的 `parseBootManifest` / `createClientModuleSystem`），同一脚本内额外 `load()` 的 id 只进 factory 表，永不 `apply`。因此最终形态改为「一个模块 id + factory 内组合」。
 
-```js
-import './client-adapter.js';
-import './client-session-panel.js';
-import './client-cs-panel-hider.js';
-import './client-default-sidebar-tab.js';
-```
+`lib/client.js` 注册唯一模块 `id: '@ianwusb/dsh-ui-adapter'`（与 bundle id 相同，保证被激活）。factory 内：
 
-四个 `client-*.js` **源码零改动**（保留各自 id、factory、inject、诊断通道），避免 2000 行代码重写。`package.json` 的 `dsh.client.inject` 取四者并集：
+1. 用局部 `const window = { __ModuleLoader__: { load: (d) => descriptors.push(d) } }` 遮蔽全局 `window`；
+2. 逐字内联各 `client-*.js` 的 IIFE（源码零改动，保留 id / factory / inject / 诊断通道）；
+3. `descriptors.map(d => d.factory(require))` 完成各模块 materialization；
+4. 合并 `inject`（取并集）并返回统一 `apply(ctx)`，依次调用各插件的 `apply`；
+5. 写 `globalThis.__DSH_UI_ADAPTER_CLIENT_MODULES__` 作为测试自证，不改变模块面。
+
+后续每融合一个插件，就在 factory 内追加一个 IIFE 并在组合 `apply` 中追加其调用；**不再新增 `load()` 调用**。`package.json` 的 `dsh.client.inject` 取四者并集：
 
 ```
 @deepseek-ai/dsh-client-runtime
@@ -109,8 +110,6 @@ import './client-default-sidebar-tab.js';
 @deepseek-ai/dsh-client-modules
 @deepseek-ai/dsh-client-locale
 ```
-
-**遗留风险（验证阶段重点确认）**：DSH 的 client 注入是否真的执行统一入口里的全部四条 import。若只执行入口而忽略静态 import，需降级为在 `lib/client.js` 内联四个 IIFE（等价于把四个文件的 IIFE 顺序粘贴进入口）。设计上优先静态 import，验证失败再降级。
 
 ### 4.2 host 半（统一 apply + 四段逻辑）
 
