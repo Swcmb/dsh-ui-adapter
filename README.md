@@ -214,10 +214,16 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 
 统一入口：
 
-- `lib/client.js` —— 静态 `import` 聚合 `client-adapter.js` 与 `client-session-panel.js`；
-- `lib/index.js` —— 聚合 `applyAdapter` 与 `applySessionPanel`，对外仍只暴露一个
-  Cordis 插件名 `dsh-ui-adapter`；同源路由 `/__ctx-bili/*` 与 `/__dsh-session-panel/*`
-  共存，互不冲突。
+- `lib/client.js` —— **唯一**一个顶层 `window.__ModuleLoader__.load({id:'@ianwusb/dsh-ui-adapter'})`。
+  四个插件的 client 半**逐字节内联**在同一个 factory 内（不是 `import`）：DSH 把本文件作为
+  classic script 注入，静态 `import` 不会执行；DSH 的 boot manifest 每个已安装 bundle 只激活
+  一个模块 id，同一脚本内注册的第二个 `load()` 只会入队、永不 `apply`。factory 内临时把
+  `window.__ModuleLoader__` 换成收集器（真实 `window` 不被遮蔽，`finally` 恢复），然后
+  合并四个 descriptor 的 `inject` 并集并依次调用各自的 `apply(ctx)`。
+- `lib/index.js` —— 聚合 `applyAdapter` / `applySessionPanel` / `applyCsPanelHider` /
+  `applyDefaultSidebarTab` 四个 host 半，对外仍只暴露一个 Cordis 插件名
+  `dsh-ui-adapter`；同源路由 `/__ctx-bili/*`、`/__dsh-session-panel/*`、
+  `/__dsh-cs-panel-hider/*` 共存，互不冲突。
 
 ### 协作契约
 
