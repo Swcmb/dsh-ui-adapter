@@ -24,6 +24,11 @@
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
+    "./client-adapter": "./lib/client-adapter.js",
+    "./client-session-panel": "./lib/client-session-panel.js",
+    "./client-cs-panel-hider": "./lib/client-cs-panel-hider.js",
+    "./client-default-sidebar-tab": "./lib/client-default-sidebar-tab.js",
+    "./config": "./lib/config.mjs",
     "./package.json": "./package.json"
   },
   "files": [
@@ -31,7 +36,11 @@
     "scripts",
     "cordis.patch.yml",
     "COPYING",
-    "README.md"
+    "README.md",
+    "NOTICES.md",
+    "LICENSE-session-panel",
+    "LICENSE-cs-panel-hider",
+    "LICENSE-default-sidebar-tab"
   ],
   "scripts": {
     "test": "node --test tests/*.test.mjs"
@@ -45,7 +54,9 @@
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-layout",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-client-modules"
       ]
     }
   }

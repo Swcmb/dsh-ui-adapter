@@ -22,6 +22,10 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const PKG = '@ianwusb/dsh-ui-adapter';
+// Task 1 mandates the short name in cordis.patch.yml (id) and lib/index.js
+// (name); this verifier accepts either the short name or the full package name.
+const SHORT_NAME = 'dsh-ui-adapter';
+const normalizeName = (value) => (value === SHORT_NAME ? PKG : value);
 // Keep the verifier's host-half imports out of the running process's log.
 process.env.DSH_CTX_BILI_BRIDGE_LOG = '0';
 const argv = process.argv.slice(2);
@@ -67,16 +71,16 @@ check('cordis.patch.yml declares the host row', () => {
   if (!yamlPath) return 'skipped (js-yaml not resolvable from the profile)';
   const yaml = req('js-yaml');
   const doc = yaml.load(fs.readFileSync(path.join(profile, 'node_modules', PKG, 'cordis.patch.yml'), 'utf8'));
-  const row = Array.isArray(doc) ? doc.flatMap((e) => e.insert ?? []).find((r) => r.id === PKG) : null;
+  const row = Array.isArray(doc) ? doc.flatMap((e) => e.insert ?? []).find((r) => normalizeName(r.id) === PKG) : null;
   if (!row) throw new Error('no insert row for the bridge');
-  if (row.name !== PKG) throw new Error(`row name is "${row.name}"`);
+  if (normalizeName(row.name) !== PKG) throw new Error(`row name is "${row.name}"`);
   return `insert ${row.id} -> ${row.name}`;
 });
 
 // 4 — the host half imports and publishes config ------------------------------
 check('host half imports and publishes config', async () => {
   const mod = await import(pathToFileURL(path.join(profile, 'node_modules', PKG, 'lib', 'index.js')).href);
-  if (mod.name !== PKG) throw new Error(`unexpected name: ${mod.name}`);
+  if (normalizeName(mod.name) !== PKG) throw new Error(`unexpected name: ${mod.name}`);
   // Regression guard: Cordis only exposes a service on the plugin context when
   // the module declares it. Without this row `ctx.webServer` throws, the route
   // is never registered, and the panel says "billion 未运行" while the proxy is
@@ -121,7 +125,7 @@ check('host half registers the same-origin ledger routes', async () => {
 check('client bundle hides the ad and mounts the switch', () => {
   const source = fs.readFileSync(path.join(profile, 'node_modules', PKG, 'lib', 'client.js'), 'utf8');
   const dom = miniDom();
-  let descriptor;
+  const descriptors = [];
   const react = {
     useSyncExternalStore: (_s, get) => get(),
     useEffect: () => {},
@@ -132,11 +136,18 @@ check('client bundle hides the ad and mounts the switch', () => {
     fetch: async () => ({ ok: true, status: 200, json: async () => ({ sessions: [{ id: 's1', conversationId: 'c1', inputTokens: 100, cachedTokens: 40, outputTokens: 5 }] }) }),
     setInterval: () => 1, clearInterval: () => {}, setTimeout: () => 1, clearTimeout: () => {},
   };
-  sandbox.window = { __ModuleLoader__: { load: (d) => { descriptor = d; } } };
+  sandbox.window = { __ModuleLoader__: { load: (d) => { descriptors.push(d); } } };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  const exports = descriptor.factory((id) => (id === 'react' ? react : {}));
+  const bundle = descriptors.find((d) => d.id === '@ianwusb/dsh-ui-adapter');
+  if (!bundle) throw new Error('the client bundle did not register its module');
+  if (descriptors.length !== 1) throw new Error(`DSH activates one module per bundle, got ${descriptors.length}`);
+  const exports = bundle.factory((id) => (id === 'react' ? react : {}));
+  const composed = Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__ ?? []);
+  if (!composed.includes('@ianwusb/dsh-ui-adapter') || !composed.includes('@local/dsh-session-panel')) {
+    throw new Error(`unified bundle did not compose both modules (got ${composed.join(', ') || 'none'})`);
+  }
   const regs = [];
   exports.apply({
     slots: { inject: (_n, f) => f(), register: (o, c) => { regs.push({ o, c }); } },

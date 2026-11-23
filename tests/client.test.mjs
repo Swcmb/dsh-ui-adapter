@@ -7,6 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// lib/client.js is the unified classic-script bundle: adapter, session-panel,
+// cs-panel-hider and default-sidebar-tab IIFEs are inlined here; the bundle
+// registers ONE module and composes the inlined descriptors inside its factory.
 const source = fs.readFileSync(path.join(here, '..', 'lib', 'client.js'), 'utf8');
 
 const LEDGER = {
@@ -118,7 +121,7 @@ function createFakeDom({ withAd = true } = {}) {
 }
 
 function loadBridge({ withAd = true, patchUsage = true } = {}) {
-  let descriptor;
+  const descriptors = [];
   const react = {
     useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
     useEffect: () => {},
@@ -148,12 +151,15 @@ function loadBridge({ withAd = true, patchUsage = true } = {}) {
     __BILI__: { origin: 'http://127.0.0.1:18787', contextTab: false },
     __DSH_CTX_BILI_BRIDGE__: { origin: 'http://127.0.0.1:18787', patchUsage },
   };
-  sandbox.window = { __ModuleLoader__: { load: (d) => { descriptor = d; } } };
+  sandbox.window = { __ModuleLoader__: { load: (d) => { descriptors.push(d); } } };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  const exports = descriptor.factory((id) => (id === 'react' ? react : {}));
-  return { exports, sandbox, react, dom };
+  const bundle = descriptors.find((d) => d.id === '@ianwusb/dsh-ui-adapter');
+  assert.ok(bundle, 'the bundle must register exactly one module under its own id');
+  assert.equal(descriptors.length, 1, 'DSH activates one module per bundle; no extra load() ids');
+  const exports = bundle.factory((id) => (id === 'react' ? react : {}));
+  return { exports, descriptors, sandbox, react, dom };
 }
 
 function makeProjectionStore() {
@@ -210,14 +216,37 @@ test('client bundle loads and declares only slots + locale', () => {
   assert.deepEqual(Array.from(exports.inject), ['slots', 'locale']);
 });
 
+test('unified script composes adapter, session-panel, cs-panel-hider and default-sidebar-tab modules', () => {
+  const { sandbox } = loadBridge();
+  assert.deepEqual(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__), [
+    '@ianwusb/dsh-ui-adapter',
+    '@local/dsh-session-panel',
+    '@local/dsh-cs-panel-hider',
+    '@local/dsh-default-sidebar-tab',
+  ]);
+});
+
+test('fused bundle installs cs-panel-hider CSS for dsh-claude-style', () => {
+  const { exports, sandbox, dom } = loadBridge();
+  const { ctx } = makeCtx();
+  exports.apply(ctx);
+  const style = dom.head.children.find((n) => n.id === 'dsh-cs-panel-hider-style');
+  assert.ok(style, 'cs-panel-hider style must be injected');
+  assert.match(style.textContent, /\.dsh-claude-details-root\{display:none!important/);
+  assert.match(style.textContent, /\.dsh-claude-session-panel-button\{display:none!important/);
+  assert.equal(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__).at(-1), '@local/dsh-default-sidebar-tab');
+});
+
 test('registers NO conversation.view tab and no sidebar tab', () => {
   const { exports } = loadBridge();
   const { ctx, injections, registrations } = makeCtx();
   exports.apply(ctx);
-  assert.deepEqual(injections, ['shell.overlay']);
+  // The fused bundle also carries session-panel's header-toggle slot; it is
+  // neither a conversation.view nor a sidebar.right.pane.tab entry.
+  assert.deepEqual(injections, ['shell.overlay', 'conversation.session.header.utilities']);
   assert.equal(injections.includes('conversation.view'), false);
   assert.equal(injections.includes('sidebar.right.pane.tab'), false);
-  assert.equal(registrations.length, 1);
+  assert.equal(registrations.length, 2);
   assert.equal(registrations[0].options.name, 'shell.overlay');
 });
 
