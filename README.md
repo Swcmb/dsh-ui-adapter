@@ -198,3 +198,45 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 ## 设计说明
 
 - **不再渲染悬浮 fallback 按钮**（2026-11-13 按用户要求移除）：切换卡只出现在 dsh-context 的广告位槽位（`slot === 'mounted'`，即打开上下文面板时）；没有槽位时控件保持隐藏，billion 的 Web UI 仍可从面板卡打开或直接访问代理地址。`tests/client.test.mjs` 已按此断言。
+
+## 会话面板套件（session-panel suite）
+
+自 2026-11-23 起，本包从单一「上下文/账本」适配器扩展为**融合插件套件**。
+`dsh-session-panel-kit` 的 `session-panel` 插件已平铺进本仓库，作为套件的第二个模块，
+与 adapter 一起由统一入口加载。
+
+| 模块 | client 半 | host 半 | 侧栏 kind | 说明 |
+|---|---|---|---|---|
+| adapter（原有） | `lib/client.js` → `lib/client-adapter.js` | `lib/index.js` → `lib/host-adapter.mjs` | — | 广告位 / 账本切换卡 / tokenUsage 垫片 |
+| session-panel | `lib/client-session-panel.js` | `lib/host-session-panel.mjs` | `dsh-session-details` | 右侧会话详情栏：环境 / 上下文 / 会话统计 / Token 用量 / 子智能体 |
+
+统一入口：
+
+- `lib/client.js` —— 静态 `import` 聚合 `client-adapter.js` 与 `client-session-panel.js`；
+- `lib/index.js` —— 聚合 `applyAdapter` 与 `applySessionPanel`，对外仍只暴露一个
+  Cordis 插件名 `dsh-ui-adapter`；同源路由 `/__ctx-bili/*` 与 `/__dsh-session-panel/*`
+  共存，互不冲突。
+
+### 协作契约
+
+- **单一 Cordis 插件名**：`cordis.patch.yml` 只保留一条 insert
+  （`id: dsh-ui-adapter` / `name: '@ianwusb/dsh-ui-adapter'`）；三个 client 模块由统一
+  client 入口加载，host 不再分别注册第二个插件。
+- **配置注入并按并集声明**：`dsh.client.inject` 取各模块并集
+  （`runtime`、`ui-layout`、`locale`、`ui-sidebar-right`、`modules`），确保详情栏挂载到
+  右侧栏所需的模块可用。
+- **边界不变**：仍不修改 `dsh-context`、`billion-context` 的包文件与 DOM；session-panel
+  只读取原生 DSH 的投影与服务，数据经同源路由下发。
+
+### 历史
+
+- `session-panel` 源自 `dsh-session-panel-kit` 子模块，于 2026-11-23 以 subtree merge
+  方式并入本仓库（`agent/fuse-kit-into-root` 分支），随后平铺到根目录；原始提交历史保留。
+- 该插件本身从 `dsh-claude-style` 的 `sessionPanel` 功能剥离并裁剪，仅依赖原生 DSH。
+
+### 许可
+
+- 融合套件整体：**GPL-3.0-or-later**（见 `COPYING`、`LICENSE-session-panel`）。
+- `lib/tokens.mjs` 与详情栏中的 token 计价算法、中文文案移植自
+  `dsh-claude-style`（MIT, © 2026 Nwflower），声明见 `NOTICES.md`；MIT 与 GPLv3 兼容，
+  汇入时保留原始 MIT 授权全文。

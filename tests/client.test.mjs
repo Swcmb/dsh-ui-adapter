@@ -7,7 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const source = fs.readFileSync(path.join(here, '..', 'lib', 'client.js'), 'utf8');
+// The adapter IIFE moved to client-adapter.js when lib/client.js became the
+// unified (import-based) suite entry; these assertions still target the adapter.
+const source = fs.readFileSync(path.join(here, '..', 'lib', 'client-adapter.js'), 'utf8');
 
 const LEDGER = {
   sessions: [{
