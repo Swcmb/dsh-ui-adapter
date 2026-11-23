@@ -160,3 +160,58 @@ attached:1, runtime-probe:56, probe:2
 
 整体状态：**DONE_WITH_CONCERNS**。
 融合实现、本地测试（32/32）与融合提交均已完成；host 侧与 HTTP 侧验证通过；client 侧统一 `import` 入口在实机上未生效，留待 Task 3 的降级路径处理。
+
+---
+
+## 4. Task 1 client 修复：classic-script 内联降级（Risk A 已解除）
+
+### 4.1 根因与修复
+
+设计文档 §4.1 line 113 / §6 line 220 预留的降级路径已被触发：DSH 把 `lib/client.js` 作为 **classic script** 注入渲染进程，原统一入口的静态 `import './client-adapter.js'` / `import './client-session-panel.js'` 不会被执行。`scripts/verify.mjs` 用 `vm.runInContext(source, sandbox)` 执行入口也印证了这一语义。
+
+修复方式：`lib/client.js` 改为 classic script，按 adapter → session-panel 顺序**逐字内联**两个完整 IIFE（1728 行），两个 `window.__ModuleLoader__.load({ id, factory })` 分别注册 `@ianwusb/dsh-ui-adapter` 与 `@local/dsh-session-panel`。`lib/client-adapter.js` / `lib/client-session-panel.js` 原样保留为各模块源码。`tests/client.test.mjs` 与 `scripts/verify.mjs` 改为收集全部 descriptor 并按 id 选取，另加 session-panel descriptor 注册断言；verify 同时接受短名 `dsh-ui-adapter` 与完整包名（不改 `cordis.patch.yml` / `lib/index.js`，二者按 brief 要求保留短名）。
+
+### 4.2 本地验证（实跑）
+
+```
+node --test tests/*.test.mjs
+# tests 33 / pass 33 / fail 0
+
+node scripts/verify.mjs --profile "D:/ai-configs/runtime/dsh/profiles/desktop"
+# 7/7 checks passed
+#   profile registers the bundle / installed package resolves
+#   cordis.patch.yml declares the host row
+#   host half imports and publishes config
+#   host half registers the same-origin ledger routes
+#   client bundle hides the ad and mounts the switch
+#   billion-context context tab disabled
+```
+
+`--compose` 未通过项仍为环境限制：`dsh` CLI 不在本机 PATH，非代码缺陷。
+
+### 4.3 DSH 干净重启与实机证据
+
+PowerShell 清 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` → `CloseMainWindow()` → 等 15s → `Stop-Process -Force` 残留 → `Start-Process "D:\ProgramFiles\DSH\DeepSeek Harness.exe"` → 等 30s。
+
+- 新进程树：`33624, 38372, 45704, 55192, 56816`；窗口 `跟大肥鱼说话 — DeepSeek Harness`。
+- 新 Web 端口：`49358`（CDP inspector `9230`）。
+- `GET http://127.0.0.1:49358/__ctx-bili/status` → **HTTP 200**，`{"origin":"http://127.0.0.1:18787","pid":19864,"live":true,"source":"instance-file","hits":{"/__ctx-bili/sessions":3,"/__ctx-bili/status":2,"/__ctx-bili/diag":1}}`。
+- `.host.log`（新 PID 56816）：
+  ```
+  apply:enter {"where":"ctx","inject":"function","on":"function","effect":"function",...}
+  bind:index-inject
+  bind:routes-ok {"origin":"http://127.0.0.1:18787"}
+  route:hit {"route":"/__ctx-bili/sessions","status":200}
+  route:hit {"route":"/__ctx-bili/status","status":200}
+  route:hit {"route":"/__ctx-bili/diag","status":204}
+  client:diag {"via":"runtime-inject","sessions":"ok","sessionCount":154,"usage":false}
+  ```
+- `.diag.log`（修复后新时间戳 `1795404470xxx` 起）出现 session-panel client stage：`loaded`、`apply`、`attached`、`rightbar-width-set`、`probe`，以及持续的 `runtime-probe`。这些事件由融合后的 `@local/dsh-session-panel` IIFE 产生，证明统一 classic-script 入口中的两个模块均被 DSH 实际执行。
+
+### 4.4 结论
+
+- adapter client：PASS（`/__ctx-bili/*` 路由命中、`client:diag` 含 154 个会话）。
+- session-panel client：PASS（`loaded` / `apply` / `attached` / `probe` 等 stage 落盘）。
+- 风险 A（静态 import 不执行）：**已解除**。
+- 仍受限：renderer DOM / console 直连（CDP 只能到 host realm）；`sidebarRightTabs` 注册表只能由上述 diag stage 间接证明。此处如实记录限制，不推断未观察到的结果。
+- 环境限制：`dsh` CLI 不在 PATH，故 `--compose` 无法执行。

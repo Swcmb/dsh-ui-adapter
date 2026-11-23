@@ -7,9 +7,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// The adapter IIFE moved to client-adapter.js when lib/client.js became the
-// unified (import-based) suite entry; these assertions still target the adapter.
-const source = fs.readFileSync(path.join(here, '..', 'lib', 'client-adapter.js'), 'utf8');
+// lib/client.js is the unified classic-script bundle: both the adapter and the
+// session-panel IIFEs are inlined here, registered as separate load() descriptors.
+const source = fs.readFileSync(path.join(here, '..', 'lib', 'client.js'), 'utf8');
 
 const LEDGER = {
   sessions: [{
@@ -120,7 +120,7 @@ function createFakeDom({ withAd = true } = {}) {
 }
 
 function loadBridge({ withAd = true, patchUsage = true } = {}) {
-  let descriptor;
+  const descriptors = [];
   const react = {
     useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
     useEffect: () => {},
@@ -150,12 +150,14 @@ function loadBridge({ withAd = true, patchUsage = true } = {}) {
     __BILI__: { origin: 'http://127.0.0.1:18787', contextTab: false },
     __DSH_CTX_BILI_BRIDGE__: { origin: 'http://127.0.0.1:18787', patchUsage },
   };
-  sandbox.window = { __ModuleLoader__: { load: (d) => { descriptor = d; } } };
+  sandbox.window = { __ModuleLoader__: { load: (d) => { descriptors.push(d); } } };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  const exports = descriptor.factory((id) => (id === 'react' ? react : {}));
-  return { exports, sandbox, react, dom };
+  const adapter = descriptors.find((d) => d.id === '@ianwusb/dsh-ui-adapter');
+  assert.ok(adapter, 'adapter descriptor must be registered by the bundle');
+  const exports = adapter.factory((id) => (id === 'react' ? react : {}));
+  return { exports, descriptors, sandbox, react, dom };
 }
 
 function makeProjectionStore() {
@@ -210,6 +212,18 @@ test('client bundle loads and declares only slots + locale', () => {
   assert.equal(typeof exports.apply, 'function');
   // Array.from copies across the vm realm so deepStrictEqual sees our Array prototype.
   assert.deepEqual(Array.from(exports.inject), ['slots', 'locale']);
+});
+
+test('unified script registers both adapter and session-panel descriptors', () => {
+  const { descriptors } = loadBridge();
+  assert.ok(
+    descriptors.some((d) => d.id === '@ianwusb/dsh-ui-adapter'),
+    'adapter descriptor must be registered',
+  );
+  assert.ok(
+    descriptors.some((d) => d.id === '@local/dsh-session-panel'),
+    'session-panel descriptor must be registered by the same script',
+  );
 });
 
 test('registers NO conversation.view tab and no sidebar tab', () => {
