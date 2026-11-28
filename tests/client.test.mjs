@@ -216,37 +216,31 @@ test('client bundle loads and declares only slots + locale', () => {
   assert.deepEqual(Array.from(exports.inject), ['slots', 'locale']);
 });
 
-test('unified script composes adapter, session-panel, cs-panel-hider and default-sidebar-tab modules', () => {
+test('unified script composes only the adapter module (sidebar suite disabled)', () => {
   const { sandbox } = loadBridge();
   assert.deepEqual(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__), [
     '@ianwusb/dsh-ui-adapter',
-    '@local/dsh-session-panel',
-    '@local/dsh-cs-panel-hider',
-    '@local/dsh-default-sidebar-tab',
   ]);
 });
 
-test('fused bundle installs cs-panel-hider CSS for dsh-claude-style', () => {
-  const { exports, sandbox, dom } = loadBridge();
+test('sidebar suite disabled: no cs-panel-hider CSS and no session header toggle', () => {
+  const { exports, dom } = loadBridge();
   const { ctx } = makeCtx();
   exports.apply(ctx);
   const style = dom.head.children.find((n) => n.id === 'dsh-cs-panel-hider-style');
-  assert.ok(style, 'cs-panel-hider style must be injected');
-  assert.match(style.textContent, /\.dsh-claude-details-root\{display:none!important/);
-  assert.match(style.textContent, /\.dsh-claude-session-panel-button\{display:none!important/);
-  assert.equal(Array.from(sandbox.__DSH_UI_ADAPTER_CLIENT_MODULES__).at(-1), '@local/dsh-default-sidebar-tab');
+  assert.equal(style, undefined, 'cs-panel-hider CSS must NOT be injected');
 });
 
-test('registers NO conversation.view tab and no sidebar tab', () => {
+test('registers only shell.overlay: no sidebar tab, no session header toggle', () => {
   const { exports } = loadBridge();
   const { ctx, injections, registrations } = makeCtx();
   exports.apply(ctx);
-  // The fused bundle also carries session-panel's header-toggle slot; it is
-  // neither a conversation.view nor a sidebar.right.pane.tab entry.
-  assert.deepEqual(injections, ['shell.overlay', 'conversation.session.header.utilities']);
+  // With the sidebar suite disabled, only adapter's shell.overlay remains.
+  assert.deepEqual(injections, ['shell.overlay']);
   assert.equal(injections.includes('conversation.view'), false);
   assert.equal(injections.includes('sidebar.right.pane.tab'), false);
-  assert.equal(registrations.length, 2);
+  assert.equal(injections.includes('conversation.session.header.utilities'), false);
+  assert.equal(registrations.length, 1);
   assert.equal(registrations[0].options.name, 'shell.overlay');
 });
 

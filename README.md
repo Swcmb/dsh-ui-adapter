@@ -4,8 +4,7 @@
 >
 > 本包为**独立仓库**（`Swcmb/dsh-ui-adapter`），独立维护与发布。2026-11-21 起从 dsh-toolkit monorepo 迁出；曾用包名 `@ianwusb/dsh-context-bili-bridge`（npm 上 0.3.x 及更早版本用旧名）。
 
-一个 [DSH (DeepSeek Harness)](https://www.deepseek.com/) 桌面端插件，把 `dsh-context` 与
-`billion-context` 两个上下文插件合并到同一个「上下文」面板里：
+一个 [DSH (DeepSeek Harness)](https://www.deepseek.com/) 桌面端插件，把 `dsh-context` 与 `billion-context` 两个上下文插件合并到同一个「上下文」面板里：
 
 - **合标签** —— 用 `billion-context` 官方开关摘掉它那个重名的「上下文」标签，保留
   `dsh-context` 的界面作为唯一视图；
@@ -200,6 +199,11 @@ node scripts/verify.mjs --profile <profile-dir> --compose   # 额外跑 dsh --du
 - **不再渲染悬浮 fallback 按钮**（2026-11-13 按用户要求移除）：切换卡只出现在 dsh-context 的广告位槽位（`slot === 'mounted'`，即打开上下文面板时）；没有槽位时控件保持隐藏，billion 的 Web UI 仍可从面板卡打开或直接访问代理地址。`tests/client.test.mjs` 已按此断言。
 
 ## 会话面板套件（session-panel suite）
+
+> **2026-11-28 状态：本节所述套件已整体停用。** 按用户要求，`session-panel`、
+> `cs-panel-hider`、`default-sidebar-tab` 三个模块已在 client / host 两侧全部取消加载，
+> 插件现仅保留 adapter（合标签 / 去广告 / 接账本数据）。以下内容作为历史记录保留，
+> 不再反映实际运行时行为。
 
 自 2026-11-23 起，本包从单一「上下文/账本」适配器扩展为**融合插件套件**。
 `dsh-session-panel-kit` 的 `session-panel`、`cs-panel-hider`、`default-sidebar-tab`
